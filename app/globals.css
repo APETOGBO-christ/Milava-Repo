@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-background: #F4F4F6;
+  --color-surface: #FFFFFF;
+  --color-primary: #0047FF;
+  --color-primary-hover: #003BCC;
+  --color-text-main: #0F0F14;
+  --color-text-secondary: #4A4A5A;
+  --color-text-muted: #9898AA;
+  --color-border: #E4E4EA;
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-main);
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+}
