@@ -5,6 +5,13 @@ import { createClient } from "@supabase/supabase-js";
 import { LoadingSkeleton } from "@/components/ui/error-display";
 import { toast } from "@/lib/toast";
 
+const PAGE_SIZE = 25;
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+);
+
 interface WithdrawalRequest {
   id: string;
   creator_id: string;
@@ -21,35 +28,46 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<string | null>(
     null,
-  );
-
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
   );
 
   useEffect(() => {
     loadWithdrawals();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const loadWithdrawals = async () => {
     try {
       setLoading(true);
-      let query = supabase.from("withdrawal_requests").select("*");
+      const from = (page - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      let query = supabase
+        .from("withdrawal_requests")
+        .select("*", { count: "exact" });
 
       if (statusFilter !== "all") {
         query = query.eq("status", statusFilter);
       }
 
-      const { data, error: err } = await query.order("requested_at", {
-        ascending: false,
-      });
+      const {
+        data,
+        error: err,
+        count,
+      } = await query
+        .order("requested_at", {
+          ascending: false,
+        })
+        .range(from, to);
 
       if (err) throw err;
       setWithdrawals(data || []);
+      setTotal(count || 0);
       setError(null);
     } catch (err) {
       const message =
@@ -70,7 +88,7 @@ export default function PaymentsPage() {
       if (err) throw err;
 
       toast.success(`Withdrawal marked as ${status}`);
-      loadWithdrawals();
+      await loadWithdrawals();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update withdrawal";
@@ -126,7 +144,10 @@ export default function PaymentsPage() {
           (status) => (
             <button
               key={status}
-              onClick={() => setStatusFilter(status)}
+              onClick={() => {
+                setStatusFilter(status);
+                setPage(1);
+              }}
               className={`px-4 py-2 rounded-lg font-medium transition ${
                 statusFilter === status
                   ? "bg-blue-600 text-white"
@@ -263,6 +284,30 @@ export default function PaymentsPage() {
           </div>
         )}
       </div>
+
+      {!loading && total > 0 && (
+        <div className="mt-4 flex items-center justify-between text-sm text-gray-600">
+          <p>
+            Page {page} / {totalPages} ({total} retraits)
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 rounded border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

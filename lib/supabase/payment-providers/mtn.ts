@@ -63,7 +63,17 @@ export class MTNProvider extends PaymentProvider {
       const total = this.calculateTotal(request.amount);
 
       if (this.isTestMode()) {
-        return this.simulatePayment(request, fee, total);
+        return {
+          success: false,
+          transactionId: "",
+          status: "failed",
+          amount: request.amount,
+          fee: Math.round(fee),
+          total: Math.round(total),
+          timestamp: new Date().toISOString(),
+          message:
+            "MTN provider is in test mode and does not run simulated payouts.",
+        };
       }
 
       return await this.callMTNAPI(request, fee, total);
@@ -80,39 +90,6 @@ export class MTNProvider extends PaymentProvider {
       };
     }
   }
-
-  private simulatePayment(
-    request: PaymentRequest,
-    fee: number,
-    total: number,
-  ): PaymentResponse {
-    // 80% success rate in test mode
-    const success = Math.random() > 0.2;
-
-    if (success) {
-      return {
-        success: true,
-        transactionId: `MTN-${request.reference}-${Date.now()}`,
-        status: "pending",
-        amount: request.amount,
-        fee: Math.round(fee),
-        total: Math.round(total),
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    return {
-      success: false,
-      transactionId: "",
-      status: "failed",
-      amount: request.amount,
-      fee: 0,
-      total: 0,
-      timestamp: new Date().toISOString(),
-      message: "Simulated payment failure: User cancelled transaction",
-    };
-  }
-
   private async callMTNAPI(
     request: PaymentRequest,
     fee: number,

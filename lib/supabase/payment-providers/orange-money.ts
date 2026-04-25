@@ -63,7 +63,17 @@ export class OrangeMoneyProvider extends PaymentProvider {
       const total = this.calculateTotal(request.amount);
 
       if (this.isTestMode()) {
-        return this.simulatePayment(request, fee, total);
+        return {
+          success: false,
+          transactionId: "",
+          status: "failed",
+          amount: request.amount,
+          fee: Math.round(fee),
+          total: Math.round(total),
+          timestamp: new Date().toISOString(),
+          message:
+            "Orange Money provider is in test mode and does not run simulated payouts.",
+        };
       }
 
       return await this.callOrangeMoneyAPI(request, fee, total);
@@ -80,39 +90,6 @@ export class OrangeMoneyProvider extends PaymentProvider {
       };
     }
   }
-
-  private simulatePayment(
-    request: PaymentRequest,
-    fee: number,
-    total: number,
-  ): PaymentResponse {
-    // 85% success rate in test mode
-    const success = Math.random() > 0.15;
-
-    if (success) {
-      return {
-        success: true,
-        transactionId: `OM-${request.reference}-${Date.now()}`,
-        status: "completed",
-        amount: request.amount,
-        fee: Math.round(fee),
-        total: Math.round(total),
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    return {
-      success: false,
-      transactionId: "",
-      status: "failed",
-      amount: request.amount,
-      fee: 0,
-      total: 0,
-      timestamp: new Date().toISOString(),
-      message: "Simulated payment failure: Insufficient balance",
-    };
-  }
-
   private async callOrangeMoneyAPI(
     request: PaymentRequest,
     fee: number,

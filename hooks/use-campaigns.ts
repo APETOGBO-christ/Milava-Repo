@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   CampaignService,
   Campaign,
@@ -9,7 +9,7 @@ import {
 } from "@/lib/supabase/campaigns";
 
 export function useCampaigns() {
-  const service = new CampaignService();
+  const service = useMemo(() => new CampaignService(), []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,6 +24,7 @@ export function useCampaigns() {
         budget_total: number;
         reward_model: RewardModel;
         reward_value: number;
+        platform_fee_rate?: number;
       },
     ): Promise<Campaign | null> => {
       setLoading(true);
@@ -40,7 +41,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // GET single campaign
@@ -60,7 +61,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // GET company campaigns
@@ -80,7 +81,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // GET active campaigns
@@ -100,7 +101,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // UPDATE campaign status
@@ -123,7 +124,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // CREATE candidature
@@ -149,7 +150,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // GET campaign candidatures
@@ -169,7 +170,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // ACCEPT candidature
@@ -189,7 +190,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // REJECT candidature
@@ -209,7 +210,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // GET creator candidatures
@@ -229,7 +230,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   // SEARCH creators
@@ -259,7 +260,7 @@ export function useCampaigns() {
         setLoading(false);
       }
     },
-    [],
+    [service],
   );
 
   return {

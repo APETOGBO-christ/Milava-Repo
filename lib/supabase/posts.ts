@@ -289,16 +289,47 @@ export class PostService {
     }>
   > {
     const posts = await this.getCreatorPosts(creatorId);
+    if (posts.length === 0) {
+      return [];
+    }
 
-    const postsWithData = await Promise.all(
-      posts.map(async (post) => {
-        const metrics = await this.getLatestMetrics(post.id);
-        const gains = await this.getPostGains(post.id);
-        return { post, metrics, gains };
-      }),
-    );
+    const postIds = posts.map((post) => post.id);
 
-    return postsWithData;
+    const [metricsResult, gainsResult] = await Promise.all([
+      this.supabase
+        .from("metrics")
+        .select("*")
+        .in("post_id", postIds)
+        .order("collected_at", { ascending: false }),
+      this.supabase
+        .from("gains")
+        .select("*")
+        .in("post_id", postIds)
+        .order("calculated_at", { ascending: false }),
+    ]);
+
+    if (metricsResult.error) throw metricsResult.error;
+    if (gainsResult.error) throw gainsResult.error;
+
+    const latestMetricsByPost = new Map<string, PostMetrics>();
+    for (const metric of (metricsResult.data || []) as PostMetrics[]) {
+      if (!latestMetricsByPost.has(metric.post_id)) {
+        latestMetricsByPost.set(metric.post_id, metric);
+      }
+    }
+
+    const latestGainsByPost = new Map<string, PostGains>();
+    for (const gain of (gainsResult.data || []) as PostGains[]) {
+      if (!latestGainsByPost.has(gain.post_id)) {
+        latestGainsByPost.set(gain.post_id, gain);
+      }
+    }
+
+    return posts.map((post) => ({
+      post,
+      metrics: latestMetricsByPost.get(post.id) || null,
+      gains: latestGainsByPost.get(post.id) || null,
+    }));
   }
 
   async getCampaignMetrics(campaignId: string): Promise<{
@@ -314,8 +345,9 @@ export class PostService {
     const approvedPosts = posts.filter(
       (p) => p.status === "approved" || p.status === "auto_approved",
     );
+    const postIds = posts.map((post) => post.id);
 
-    let totals = {
+    const totals = {
       totalImpressions: 0,
       totalClicks: 0,
       totalLeads: 0,
@@ -325,10 +357,73 @@ export class PostService {
       approvedCount: approvedPosts.length,
     };
 
-    // Fetch metrics and gains for all posts
-    for (const post of posts) {
-      const metrics = await this.getLatestMetrics(post.id);
-      const gains = await this.getPostGains(post.id);
+    if (postIds.length === 0) {
+      return totals;
+    }
+
+    const [metricsResult, gainsResult] = await Promise.all([
+      this.supabase
+        .from("metrics")
+        .select(
+          "post_id, impressions, clicks, leads, conversions, collected_at",
+        )
+        .in("post_id", postIds)
+        .order("collected_at", { ascending: false }),
+      this.supabase
+        .from("gains")
+        .select("post_id, total_gain, calculated_at")
+        .in("post_id", postIds)
+        .order("calculated_at", { ascending: false }),
+    ]);
+
+    if (metricsResult.error) throw metricsResult.error;
+    if (gainsResult.error) throw gainsResult.error;
+
+    const metricsRows = (metricsResult.data || []) as Array<{
+      post_id: string;
+      impressions: number;
+      clicks: number;
+      leads: number;
+      conversions: number;
+    }>;
+
+    const gainsRows = (gainsResult.data || []) as Array<{
+      post_id: string;
+      total_gain: number;
+    }>;
+
+    const latestMetricsByPost = new Map<
+      string,
+      {
+        impressions: number;
+        clicks: number;
+        leads: number;
+        conversions: number;
+      }
+    >();
+
+    for (const metric of metricsRows) {
+      if (!latestMetricsByPost.has(metric.post_id)) {
+        latestMetricsByPost.set(metric.post_id, {
+          impressions: metric.impressions,
+          clicks: metric.clicks,
+          leads: metric.leads,
+          conversions: metric.conversions,
+        });
+      }
+    }
+
+    const latestGainByPost = new Map<string, number>();
+
+    for (const gain of gainsRows) {
+      if (!latestGainByPost.has(gain.post_id)) {
+        latestGainByPost.set(gain.post_id, gain.total_gain || 0);
+      }
+    }
+
+    for (const postId of postIds) {
+      const metrics = latestMetricsByPost.get(postId);
+      const gain = latestGainByPost.get(postId) || 0;
 
       if (metrics) {
         totals.totalImpressions += metrics.impressions;
@@ -337,9 +432,7 @@ export class PostService {
         totals.totalConversions += metrics.conversions;
       }
 
-      if (gains) {
-        totals.totalGain += gains.total_gain;
-      }
+      totals.totalGain += gain;
     }
 
     return totals;

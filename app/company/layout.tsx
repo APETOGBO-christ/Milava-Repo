@@ -1,15 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   BarChart3,
+  Gift,
   LayoutDashboard,
   PlusCircle,
-  Settings2,
   User,
+  Wallet,
 } from "lucide-react";
 import {
   WorkspaceSidebar,
@@ -23,6 +24,8 @@ export default function CompanyLayout({
 }) {
   const router = useRouter();
   const { authUser, userProfile, loading, signOut } = useAuth();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+  const [footerBalance, setFooterBalance] = useState("$0.00");
 
   // Redirect to home if not authenticated or not a company
   useEffect(() => {
@@ -31,15 +34,38 @@ export default function CompanyLayout({
     }
   }, [authUser, userProfile, loading, router]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F4F4F6]">
-        <p className="text-[#4A4A5A]">Chargement...</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const loadCampaignBalance = async () => {
+      if (!authUser?.id) {
+        setFooterBalance("$0.00");
+        return;
+      }
 
-  if (!authUser || userProfile?.role !== "company") {
+      try {
+        const { data, error } = await supabase
+          .from("campaigns")
+          .select("budget_usable")
+          .eq("company_id", authUser.id);
+
+        if (error) throw error;
+
+        const totalUsable = (data || []).reduce(
+          (sum: number, row: any) => sum + Number(row.budget_usable || 0),
+          0,
+        );
+
+        setFooterBalance(`$${totalUsable.toFixed(2)}`);
+      } catch {
+        setFooterBalance("$0.00");
+      }
+    };
+
+    loadCampaignBalance();
+  }, [authUser?.id, supabase]);
+
+  const canRender = !!authUser && userProfile?.role === "company";
+
+  if (!canRender && !loading) {
     return null;
   }
 
@@ -55,30 +81,30 @@ export default function CompanyLayout({
       href: "/company/campaigns/new",
       icon: PlusCircle,
     },
+    { label: "Portefeuille", href: "/company/wallet", icon: Wallet },
     { label: "Performance", href: "/company/analytics", icon: BarChart3 },
     { label: "Profil marque", href: "/company/profile", icon: User },
   ];
 
-  const identityMark = (userProfile.companyName?.[0] ?? "M").toUpperCase();
+  const companyName = userProfile?.companyName || "Entreprise";
+  const identityMark = (companyName[0] ?? "M").toUpperCase();
 
   return (
     <div className="min-h-screen bg-[#F4F4F6] lg:flex">
       <WorkspaceSidebar
         sectionLabel="Espace marque"
-        identityName={userProfile.companyName || "Entreprise"}
+        identityName={companyName}
         identitySubtext="Verified enterprise"
         identityMark={identityMark}
         navItems={navItems}
-        utilityHref="/company/profile"
-        utilityLabel="Paramètres"
-        utilityIcon={Settings2}
+        utilityHref="/company/referrals"
+        utilityLabel="Parrainages"
+        utilityIcon={Gift}
         onLogout={() => signOut()}
         accent="company"
-        footerEyebrow="Commission Milava"
-        footerValue="20%"
-        footerCaption="Prélevée sur chaque budget déposé"
-        footerActionLabel="Nouvelle campagne"
-        footerActionHref="/company/campaigns/new"
+        footerAnnouncements="Annonces"
+        footerBalance={footerBalance}
+        footerBrandName={companyName}
       />
 
       <div className="flex min-h-screen flex-1 flex-col">

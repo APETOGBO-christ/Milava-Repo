@@ -64,7 +64,17 @@ export class StripeProvider extends PaymentProvider {
       const amountInCents = Math.round(request.amount * 100);
 
       if (this.isTestMode()) {
-        return this.simulatePayment(request, fee, total);
+        return {
+          success: false,
+          transactionId: "",
+          status: "failed",
+          amount: request.amount,
+          fee: Math.round(fee),
+          total: Math.round(total),
+          timestamp: new Date().toISOString(),
+          message:
+            "Stripe provider is in test mode and does not run simulated payouts.",
+        };
       }
 
       return await this.callStripeAPI(amountInCents, request, fee, total);
@@ -81,39 +91,6 @@ export class StripeProvider extends PaymentProvider {
       };
     }
   }
-
-  private simulatePayment(
-    request: PaymentRequest,
-    fee: number,
-    total: number,
-  ): PaymentResponse {
-    // 90% success rate in test mode
-    const success = Math.random() > 0.1;
-
-    if (success) {
-      return {
-        success: true,
-        transactionId: `pi_${request.reference}_${Date.now()}`,
-        status: "completed",
-        amount: request.amount,
-        fee: Math.round(fee),
-        total: Math.round(total),
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    return {
-      success: false,
-      transactionId: "",
-      status: "failed",
-      amount: request.amount,
-      fee: 0,
-      total: 0,
-      timestamp: new Date().toISOString(),
-      message: "Simulated payment failure: Card declined",
-    };
-  }
-
   private async callStripeAPI(
     amountInCents: number,
     request: PaymentRequest,

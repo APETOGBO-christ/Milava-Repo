@@ -261,7 +261,15 @@ export function usePosts() {
       const message =
         err instanceof Error ? err.message : "Erreur lors du chargement";
       setError(message);
-      throw err;
+      return {
+        totalImpressions: 0,
+        totalClicks: 0,
+        totalLeads: 0,
+        totalConversions: 0,
+        totalGain: 0,
+        postCount: 0,
+        approvedCount: 0,
+      };
     } finally {
       setLoading(false);
     }

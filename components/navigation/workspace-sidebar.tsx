@@ -1,16 +1,19 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import type { LucideIcon } from 'lucide-react';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
 import {
   ArrowUpRight,
   BellRing,
   BriefcaseBusiness,
   LogOut,
-} from 'lucide-react';
+  Megaphone,
+  Wallet,
+  Bell,
+} from "lucide-react";
 
 export interface WorkspaceNavItem {
   label: string;
@@ -29,29 +32,32 @@ interface WorkspaceSidebarProps {
   utilityLabel: string;
   utilityIcon: LucideIcon;
   onLogout: () => void;
-  accent: 'creator' | 'company';
-  footerEyebrow: string;
-  footerValue: string;
-  footerCaption: string;
-  footerActionLabel: string;
-  footerActionHref: string;
+  accent: "creator" | "company";
+  footerEyebrow?: string;
+  footerValue?: string;
+  footerCaption?: string;
+  footerActionLabel?: string;
+  footerActionHref?: string;
+  // New footer props
+  footerAnnouncements?: string;
+  footerBalance?: string;
+  footerBrandName?: string;
 }
 
 function isItemActive(pathname: string, item: WorkspaceNavItem) {
   return item.exact ? pathname === item.href : pathname.startsWith(item.href);
 }
 
-function MobileBottomNav({
-  navItems,
-}: {
-  navItems: WorkspaceNavItem[];
-}) {
+function MobileBottomNav({ navItems }: { navItems: WorkspaceNavItem[] }) {
   const pathname = usePathname();
   const columns = Math.max(3, Math.min(navItems.length, 4));
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#E4E4EA] bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur lg:hidden">
-      <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+      <div
+        className="grid gap-2"
+        style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      >
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = isItemActive(pathname, item);
@@ -61,14 +67,16 @@ function MobileBottomNav({
               key={item.href}
               href={item.href}
               className={cn(
-                'flex min-h-14 flex-col items-center justify-center gap-1 rounded-[14px] px-2 text-center transition-colors',
+                "flex min-h-14 flex-col items-center justify-center gap-1 rounded-[14px] px-2 text-center transition-colors",
                 active
-                  ? 'bg-[#EEF4FF] text-[#0047FF]'
-                  : 'text-[#7A7E8A] hover:bg-[#F7F8FB] hover:text-[#0F0F14]'
+                  ? "bg-[#EEF4FF] text-[#0047FF]"
+                  : "text-[#7A7E8A] hover:bg-[#F7F8FB] hover:text-[#0F0F14]",
               )}
             >
               <Icon className="h-5 w-5" />
-              <span className="text-[10px] font-semibold leading-none">{item.label}</span>
+              <span className="text-[10px] font-semibold leading-none">
+                {item.label}
+              </span>
             </Link>
           );
         })}
@@ -93,8 +101,12 @@ export function WorkspaceSidebar({
   footerCaption,
   footerActionLabel,
   footerActionHref,
+  footerAnnouncements,
+  footerBalance,
+  footerBrandName,
 }: WorkspaceSidebarProps) {
   const pathname = usePathname();
+  const useNewFooter = footerAnnouncements || footerBalance || footerBrandName;
 
   return (
     <>
@@ -120,22 +132,22 @@ export function WorkspaceSidebar({
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      'group flex items-center gap-3 rounded-[16px] px-3.5 py-3 text-sm font-semibold transition-all duration-200',
+                      "group flex items-center gap-3 rounded-[16px] px-3.5 py-3 text-sm font-semibold transition-all duration-200",
                       active
-                        ? accent === 'creator'
-                          ? 'bg-[linear-gradient(90deg,#EEF4FF_0%,#DCE8FF_100%)] text-[#0047FF] shadow-[0_12px_22px_rgba(0,71,255,0.12)]'
-                          : 'bg-[linear-gradient(90deg,#0047FF_0%,#2E84FF_100%)] text-white shadow-[0_14px_24px_rgba(0,71,255,0.20)]'
-                        : 'text-[#5F6472] hover:bg-[#F4F6FA] hover:text-[#0F0F14]'
+                        ? accent === "creator"
+                          ? "bg-[linear-gradient(90deg,#EEF4FF_0%,#DCE8FF_100%)] text-[#0047FF] shadow-[0_12px_22px_rgba(0,71,255,0.12)]"
+                          : "bg-[linear-gradient(90deg,#0047FF_0%,#2E84FF_100%)] text-white shadow-[0_14px_24px_rgba(0,71,255,0.20)]"
+                        : "text-[#5F6472] hover:bg-[#F4F6FA] hover:text-[#0F0F14]",
                     )}
                   >
                     <div
                       className={cn(
-                        'flex h-10 w-10 items-center justify-center rounded-[12px] transition-colors',
+                        "flex h-10 w-10 items-center justify-center rounded-[12px] transition-colors",
                         active
-                          ? accent === 'creator'
-                            ? 'bg-white text-[#0047FF]'
-                            : 'bg-white/16 text-white'
-                          : 'bg-[#F9FAFD] text-[#5F6472] group-hover:bg-white group-hover:text-[#0047FF]'
+                          ? accent === "creator"
+                            ? "bg-white text-[#0047FF]"
+                            : "bg-white/16 text-white"
+                          : "bg-[#F9FAFD] text-[#5F6472] group-hover:bg-white group-hover:text-[#0047FF]",
                       )}
                     >
                       <Icon className="h-[18px] w-[18px]" />
@@ -174,65 +186,43 @@ export function WorkspaceSidebar({
               </button>
             </div>
 
-            <div
-              className={cn(
-                'rounded-[24px] p-4 shadow-[0_18px_32px_rgba(15,15,20,0.10)]',
-                accent === 'creator'
-                  ? 'bg-[linear-gradient(135deg,#FFFFFF_0%,#F1F6FF_100%)] border border-[#DCE8FF]'
-                  : 'bg-[linear-gradient(135deg,#0E1E46_0%,#1C2E68_100%)] text-white'
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p
-                    className={cn(
-                      'text-[11px] font-semibold uppercase tracking-[0.18em]',
-                      accent === 'creator' ? 'text-[#9898AA]' : 'text-white/62'
-                    )}
-                  >
-                    {footerEyebrow}
-                  </p>
-                  <p className="mt-2 text-[1.65rem] font-bold tracking-[-0.04em] font-display">
-                    {footerValue}
-                  </p>
-                  <p
-                    className={cn(
-                      'mt-1 text-sm',
-                      accent === 'creator' ? 'text-[#4A4A5A]' : 'text-white/72'
-                    )}
-                  >
-                    {footerCaption}
-                  </p>
+            <div className="rounded-[24px] border border-[#E4E4EA] bg-white p-4 shadow-[0_10px_24px_rgba(15,15,20,0.05)] space-y-3">
+              {/* Annonces */}
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#EEF4FF]">
+                  <Megaphone className="h-4 w-4 text-[#0047FF]" />
                 </div>
-                <div
-                  className={cn(
-                    'flex h-11 w-11 items-center justify-center rounded-[16px]',
-                    accent === 'creator'
-                      ? 'bg-[#0047FF] text-white'
-                      : 'bg-white/10 text-white'
-                  )}
-                >
-                  {accent === 'creator' ? (
-                    <BellRing className="h-5 w-5" />
-                  ) : (
-                    <BriefcaseBusiness className="h-5 w-5" />
-                  )}
-                </div>
+                <span className="text-sm font-semibold text-[#0047FF]">
+                  Annonces
+                </span>
               </div>
 
-              <Link href={footerActionHref} className="mt-4 block">
-                <Button
-                  className={cn(
-                    'h-11 w-full rounded-[14px] text-sm font-semibold shadow-none',
-                    accent === 'creator'
-                      ? 'bg-[linear-gradient(90deg,#0047FF_0%,#2E84FF_100%)] text-white hover:opacity-95'
-                      : 'bg-white text-[#0E1E46] hover:bg-[#F3F5FF]'
-                  )}
-                >
-                  {footerActionLabel}
-                  <ArrowUpRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+              {/* Solde */}
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F0F0F0]">
+                  <Wallet className="h-4 w-4 text-[#5F6472]" />
+                </div>
+                <span className="text-sm font-semibold text-[#4A4A5A]">
+                  Solde : {footerBalance}
+                </span>
+              </div>
+
+              {/* Nom de marque + notification */}
+              <div className="flex items-center justify-between pt-1 border-t border-[#E4E4EA]">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#6366F1]/10">
+                    <span className="text-xs font-bold text-[#6366F1]">
+                      {(footerBrandName?.[0] || "?").toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-sm font-semibold text-[#0F0F14]">
+                    {footerBrandName}
+                  </span>
+                </div>
+                <button className="h-7 w-7 rounded-[8px] hover:bg-[#F4F4F6] flex items-center justify-center transition-colors">
+                  <Bell className="h-4 w-4 text-[#4A4A5A]" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -243,10 +233,10 @@ export function WorkspaceSidebar({
           <div className="flex min-w-0 items-center gap-3">
             <div
               className={cn(
-                'flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] text-sm font-bold',
-                accent === 'creator'
-                  ? 'bg-[linear-gradient(135deg,#EEF4FF_0%,#DCE8FF_100%)] text-[#0047FF]'
-                  : 'bg-[linear-gradient(135deg,#0047FF_0%,#2E84FF_100%)] text-white'
+                "flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] text-sm font-bold",
+                accent === "creator"
+                  ? "bg-[linear-gradient(135deg,#EEF4FF_0%,#DCE8FF_100%)] text-[#0047FF]"
+                  : "bg-[linear-gradient(135deg,#0047FF_0%,#2E84FF_100%)] text-white",
               )}
             >
               {identityMark}

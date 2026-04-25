@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { Megaphone, Settings2, User, Wallet } from "lucide-react";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { Gift, Megaphone, User, Wallet } from "lucide-react";
 import {
   WorkspaceSidebar,
   type WorkspaceNavItem,
@@ -17,6 +17,8 @@ export default function CreatorLayout({
 }) {
   const router = useRouter();
   const { authUser, userProfile, loading, signOut } = useAuth();
+  const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+  const [footerBalance, setFooterBalance] = useState("$0.00");
 
   // Redirect to home if not authenticated or not a creator
   useEffect(() => {
@@ -25,15 +27,34 @@ export default function CreatorLayout({
     }
   }, [authUser, userProfile, loading, router]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F4F4F6]">
-        <p className="text-[#4A4A5A]">Chargement...</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const loadWalletBalance = async () => {
+      if (!authUser?.id) {
+        setFooterBalance("$0.00");
+        return;
+      }
 
-  if (!authUser || userProfile?.role !== "creator") {
+      try {
+        const { data, error } = await supabase
+          .from("wallet_accounts")
+          .select("available_balance")
+          .eq("creator_id", authUser.id)
+          .maybeSingle();
+
+        if (error) throw error;
+        const value = Number(data?.available_balance || 0);
+        setFooterBalance(`$${value.toFixed(2)}`);
+      } catch {
+        setFooterBalance("$0.00");
+      }
+    };
+
+    loadWalletBalance();
+  }, [authUser?.id, supabase]);
+
+  const canRender = !!authUser && userProfile?.role === "creator";
+
+  if (!canRender && !loading) {
     return null;
   }
 
@@ -48,10 +69,10 @@ export default function CreatorLayout({
     { label: "Profil", href: "/creator/profile", icon: User },
   ];
 
-  const displayName = [userProfile.firstName, userProfile.lastName]
+  const displayName = [userProfile?.firstName, userProfile?.lastName]
     .filter(Boolean)
     .join(" ");
-  const identityMark = (userProfile.firstName?.[0] ?? "C").toUpperCase();
+  const identityMark = (userProfile?.firstName?.[0] ?? "C").toUpperCase();
 
   return (
     <div className="min-h-screen bg-[#F4F4F6] lg:flex">
@@ -61,16 +82,14 @@ export default function CreatorLayout({
         identitySubtext="Creator studio"
         identityMark={identityMark}
         navItems={navItems}
-        utilityHref="/creator/profile"
-        utilityLabel="Paramètres"
-        utilityIcon={Settings2}
+        utilityHref="/creator/referrals"
+        utilityLabel="Parrainages"
+        utilityIcon={Gift}
         onLogout={() => signOut()}
         accent="creator"
-        footerEyebrow="Solde disponible"
-        footerValue="$0.00"
-        footerCaption="En attente: $0.00"
-        footerActionLabel="Gérer mon wallet"
-        footerActionHref="/creator/wallet"
+        footerAnnouncements="Annonces"
+        footerBalance={footerBalance}
+        footerBrandName={displayName || "Créateur"}
       />
 
       <div className="flex min-h-screen flex-1 flex-col">

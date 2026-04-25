@@ -29,6 +29,24 @@ export interface UserProfile {
 export class AuthService {
   private supabase = createBrowserSupabaseClient();
 
+  private isSessionMissingError(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+
+    const maybeError = error as { name?: string; message?: string };
+    const name = (maybeError.name || "").toLowerCase();
+    const message = (maybeError.message || "").toLowerCase();
+
+    return (
+      name.includes("authsessionmissingerror") ||
+      message.includes("auth session missing")
+    );
+  }
+
+  private getRelationRow<T>(value: T | T[] | null | undefined): T | null {
+    if (!value) return null;
+    return Array.isArray(value) ? (value[0] ?? null) : value;
+  }
+
   async signUp(
     email: string,
     password: string,
@@ -122,10 +140,21 @@ export class AuthService {
 
   async getCurrentUser() {
     try {
+      const {
+        data: { session },
+      } = await this.supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        return null;
+      }
+
       const { data, error } = await this.supabase.auth.getUser();
       if (error) throw error;
       return data.user;
     } catch (error) {
+      if (this.isSessionMissingError(error)) {
+        return null;
+      }
       console.error("Get current user error:", error);
       return null;
     }
@@ -157,8 +186,11 @@ export class AuthService {
         updatedAt: data.updated_at,
       };
 
-      if (data.role === "company" && data.company_profiles[0]) {
-        const cp = data.company_profiles[0];
+      const companyProfile = this.getRelationRow<any>(data.company_profiles);
+      const creatorProfile = this.getRelationRow<any>(data.creator_profiles);
+
+      if (data.role === "company" && companyProfile) {
+        const cp = companyProfile;
         return {
           ...baseProfile,
           companyName: cp.company_name,
@@ -167,8 +199,8 @@ export class AuthService {
           description: cp.description,
           logoPath: cp.logo_path,
         };
-      } else if (data.role === "creator" && data.creator_profiles[0]) {
-        const cr = data.creator_profiles[0];
+      } else if (data.role === "creator" && creatorProfile) {
+        const cr = creatorProfile;
         return {
           ...baseProfile,
           firstName: cr.first_name,
@@ -244,9 +276,11 @@ export class AuthService {
   }
 
   onAuthStateChange(callback: (user: AuthUser | null) => void) {
-    return this.supabase.auth.onAuthStateChange((event, session) => {
-      callback(session?.user || null);
-    });
+    return this.supabase.auth.onAuthStateChange(
+      (_event: string, session: { user?: AuthUser | null } | null) => {
+        callback(session?.user || null);
+      },
+    );
   }
 }
 

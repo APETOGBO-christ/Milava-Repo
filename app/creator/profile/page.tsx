@@ -5,33 +5,30 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
   CheckCircle2,
-  Instagram,
-  Youtube,
-  Facebook,
-  Twitter,
-  Smartphone,
   Plus,
   Copy,
   Loader2,
   AlertCircle,
   Check,
   Clock,
+  User,
+  Shield,
+  LogOut,
+  Instagram,
+  Youtube,
+  Facebook,
+  Twitter,
+  Smartphone,
+  MapPin,
+  Phone,
+  PenSquare,
+  Sparkles,
 } from "lucide-react";
 
 interface SocialAccount {
   id: string;
-  platform: "TikTok" | "Instagram" | "YouTube" | "Facebook" | "X" | "Snapchat";
+  platform: string;
   profile_url: string;
   username: string;
   display_name?: string;
@@ -42,18 +39,40 @@ interface SocialAccount {
   engagement_rate: number;
 }
 
-// Initialize Supabase client once
 const supabase = createBrowserSupabaseClient();
+
+function generateVerificationCode() {
+  return "#" + Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+function extractUsername(url: string) {
+  const parts = url.split("/").filter(Boolean);
+  return parts[parts.length - 1] || url;
+}
+function formatFollowers(n: number) {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n.toString();
+}
+
+const platformIcon = (p: string) => {
+  const cls = "w-4 h-4";
+  if (p === "Instagram") return <Instagram className={cls} />;
+  if (p === "YouTube") return <Youtube className={cls} />;
+  if (p === "Facebook") return <Facebook className={cls} />;
+  if (p === "X") return <Twitter className={cls} />;
+  return <Smartphone className={cls} />;
+};
+
+const inputCls =
+  "w-full h-11 px-4 rounded-xl border border-[#E4E4EA] bg-[#F4F4F6] text-[#0F0F14] text-sm placeholder-[#9898AA] outline-none focus:border-[#0047FF] focus:bg-white transition-all disabled:opacity-50";
+const labelCls =
+  "block text-xs font-semibold text-[#0F0F14] uppercase tracking-wide mb-1.5";
 
 export default function CreatorProfilePage() {
   const router = useRouter();
   const { authUser, userProfile, loading, updateProfile, signOut } = useAuth();
-
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -61,95 +80,98 @@ export default function CreatorProfilePage() {
     country: "",
     phone: "",
   });
-
   const [socials, setSocials] = useState<SocialAccount[]>([]);
+  const [countries, setCountries] = useState<string[]>([]);
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const [isAddingSocial, setIsAddingSocial] = useState(false);
   const [newSocial, setNewSocial] = useState({
-    platform: "Instagram" as const,
+    platform: "",
     profile_url: "",
   });
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [verificationCode, setVerificationCode] = useState("");
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Initialize form data
   useEffect(() => {
-    if (userProfile) {
+    if (userProfile)
       setFormData({
         firstName: userProfile.firstName || "",
         lastName: userProfile.lastName || "",
         bio: userProfile.bio || "",
         country: userProfile.country || "",
-        phone: userProfile.phone || "",
+        phone: (userProfile as any).phone || "",
       });
-    }
   }, [userProfile]);
 
-  // Load social accounts
   const loadSocials = useCallback(async () => {
     if (!authUser) return;
-    try {
-      const { data, error } = await supabase
-        .from("social_accounts")
-        .select("*")
-        .eq("creator_id", authUser.id);
-
-      if (error) throw error;
-      setSocials(data || []);
-    } catch (err) {
-      console.error("Error loading socials:", err);
-    }
+    const { data } = await supabase
+      .from("social_accounts")
+      .select("*")
+      .eq("creator_id", authUser.id);
+    setSocials(data || []);
   }, [authUser]);
 
   useEffect(() => {
-    if (authUser) {
-      loadSocials();
-    }
+    if (authUser) loadSocials();
   }, [authUser, loadSocials]);
 
-  // Redirect if not logged in as creator
   useEffect(() => {
-    if (!loading && (!authUser || userProfile?.role !== "creator")) {
-      router.push("/");
-    }
-  }, [authUser, userProfile, loading, router]);
+    const loadTaxonomy = async () => {
+      try {
+        const [countriesRes, platformsRes] = await Promise.all([
+          fetch("/api/public/taxonomy?type=country"),
+          fetch("/api/public/taxonomy?type=social_platform"),
+        ]);
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-    >,
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    setError("");
-    setSuccess("");
-  };
+        const countriesPayload = countriesRes.ok
+          ? await countriesRes.json()
+          : null;
+        const platformPayload = platformsRes.ok
+          ? await platformsRes.json()
+          : null;
+
+        const countryValues: string[] = countriesPayload?.values || [];
+        const platformValues: string[] = platformPayload?.values || [];
+
+        setCountries(countryValues);
+        setPlatforms(platformValues);
+
+        if (platformValues.length > 0) {
+          setNewSocial((prev) => ({
+            ...prev,
+            platform: prev.platform || platformValues[0],
+          }));
+        }
+      } catch {
+        setCountries([]);
+        setPlatforms([]);
+      }
+    };
+
+    loadTaxonomy();
+  }, []);
+
+  useEffect(() => {
+    if (!loading && (!authUser || userProfile?.role !== "creator"))
+      router.push("/");
+  }, [authUser, userProfile, loading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setSuccess("");
-
     if (!formData.firstName || !formData.lastName || !formData.country) {
-      setError("Complétez au moins le prénom, nom et pays.");
+      setError("Prénom, nom et pays sont requis.");
       return;
     }
-
     setIsSaving(true);
     try {
-      await updateProfile({
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        bio: formData.bio,
-        country: formData.country,
-        phone: formData.phone,
-      });
-      setSuccess("Profil mis à jour avec succès!");
+      await updateProfile(formData);
+      setSuccess("Profil mis à jour !");
       setIsEditing(false);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Erreur lors de la mise à jour.",
-      );
+      setError(err instanceof Error ? err.message : "Erreur de mise à jour.");
     } finally {
       setIsSaving(false);
     }
@@ -157,597 +179,490 @@ export default function CreatorProfilePage() {
 
   const handleAddSocial = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUser || !newSocial.profile_url) return;
-
+    if (!authUser || !newSocial.profile_url || !newSocial.platform) return;
     setError("");
     setIsSaving(true);
-
     try {
-      const verificationCode = generateVerificationCode();
-
-      const { error } = await supabase.from("social_accounts").insert({
+      const code = generateVerificationCode();
+      const { error: dbErr } = await supabase.from("social_accounts").insert({
         creator_id: authUser.id,
         platform: newSocial.platform,
         profile_url: newSocial.profile_url,
         username: extractUsername(newSocial.profile_url),
         display_name: "",
         is_verified: false,
-        verification_code: verificationCode,
+        verification_code: code,
         verification_expires_at: new Date(
           Date.now() + 48 * 60 * 60 * 1000,
         ).toISOString(),
       });
-
-      if (error) throw error;
-
-      setSuccess("Réseau ajouté! Procédez à la vérification.");
-      setNewSocial({ platform: "Instagram", profile_url: "" });
+      if (dbErr) throw dbErr;
+      setNewSocial((prev) => ({
+        platform: prev.platform,
+        profile_url: "",
+      }));
       setIsAddingSocial(false);
       await loadSocials();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Erreur lors de l'ajout du réseau.",
-      );
+      setError(err instanceof Error ? err.message : "Erreur lors de l'ajout.");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleVerifyClick = async (social: SocialAccount) => {
-    setVerifyingId(social.id);
-    setVerificationCode(social.verification_code || "");
+  const handleVerifyClick = (s: SocialAccount) => {
+    setVerifyingId(s.id);
+    setVerificationCode(s.verification_code || "");
   };
 
-  const handleVerify = async (socialId: string) => {
+  const handleVerify = async (id: string) => {
     if (!authUser) return;
-
     try {
-      // In production, you would scrape the social account to verify the code exists in bio
-      // For now, simulate verification
-      const { error } = await supabase
+      const { error: dbErr } = await supabase
         .from("social_accounts")
         .update({
           is_verified: true,
           verified_at: new Date().toISOString(),
-          followers_count: Math.floor(Math.random() * 50000) + 1000,
-          engagement_rate: Math.random() * 15,
         })
-        .eq("id", socialId);
-
-      if (error) throw error;
-
-      setSuccess("Réseau vérifié avec succès!");
+        .eq("id", id);
+      if (dbErr) throw dbErr;
+      setSuccess("Réseau vérifié !");
       setVerifyingId(null);
       await loadSocials();
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Erreur lors de la vérification.",
-      );
+      setError(err instanceof Error ? err.message : "Erreur de vérification.");
     }
   };
 
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(verificationCode);
-      setCopiedCode(true);
-      setTimeout(() => setCopiedCode(false), 2000);
-    } catch (err) {
-      console.error("Copy failed:", err);
-    }
+  const copyCode = () => {
+    navigator.clipboard.writeText(verificationCode);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const handleContinue = () => {
-    router.push("/creator/dashboard");
-  };
-
-  if (loading) {
+  if (loading)
     return (
-      <main className="flex-1 flex items-center justify-center p-4 bg-[#F4F4F6] min-h-screen">
-        <p className="text-[#4A4A5A]">Chargement du profil...</p>
-      </main>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#0047FF]" />
+      </div>
     );
-  }
 
-  const isProfileComplete =
-    formData.firstName && formData.lastName && formData.country;
-  const hasSocials = socials.length > 0;
-  const hasVerifiedSocials = socials.some((s) => s.is_verified);
+  const initials =
+    `${formData.firstName?.[0] || ""}${formData.lastName?.[0] || ""}`.toUpperCase() ||
+    "?";
+  const verifiedCount = socials.filter((s) => s.is_verified).length;
 
   return (
-    <main className="flex-1 flex flex-col items-center justify-center p-4 bg-[#F4F4F6] min-h-screen py-8">
-      <div className="w-full max-w-2xl space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-start mb-8">
-          <div>
-            <h1 className="text-3xl font-bold font-display text-[#0F0F14] mb-2">
-              Mon Profil Créateur
-            </h1>
-            <p className="text-[#4A4A5A]">
-              Complétez votre profil et vérifiez vos réseaux pour postuler.
-            </p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="rounded-2xl border border-[#DCE7FF] bg-[linear-gradient(135deg,#FFFFFF_0%,#F3F7FF_100%)] p-5 sm:p-6 shadow-[0_16px_34px_rgba(0,71,255,0.08)]">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-[#0047FF] flex items-center justify-center flex-shrink-0 shadow-[0_12px_24px_rgba(0,71,255,0.22)]">
+              <span className="text-white text-lg font-bold">{initials}</span>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7C87A1] mb-1">
+                Espace créateur
+              </p>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-[-0.03em] text-[#0F0F14]">
+                Mon profil
+              </h1>
+              <p className="text-sm text-[#5F6472] mt-1">
+                {verifiedCount} réseau{verifiedCount > 1 ? "x" : ""} vérifié
+                {verifiedCount > 1 ? "s" : ""}
+              </p>
+            </div>
           </div>
-          <Button variant="secondary" onClick={() => signOut()}>
+          <button
+            onClick={() => signOut()}
+            className="inline-flex items-center justify-center gap-1.5 h-10 px-4 rounded-xl border border-[#E4E4EA] bg-white text-xs font-semibold text-[#4A4A5A] hover:border-red-200 hover:text-red-500 transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" />
             Déconnexion
-          </Button>
+          </button>
+        </div>
+      </div>
+
+      {/* Alerts */}
+      {error && (
+        <div className="flex gap-2.5 p-3 rounded-xl bg-red-50 border border-red-100">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+      )}
+      {success && (
+        <div className="flex gap-2.5 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-emerald-700 font-medium">{success}</p>
+        </div>
+      )}
+
+      {/* Profile card */}
+      <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_8px_24px_rgba(15,15,20,0.06)] overflow-hidden">
+        {/* Avatar + name bar */}
+        <div className="flex items-center gap-4 px-6 py-5 border-b border-[#E4E4EA]">
+          <div className="w-14 h-14 rounded-2xl bg-[#EEF4FF] border border-[#CFE0FF] flex items-center justify-center flex-shrink-0">
+            <User className="w-6 h-6 text-[#0047FF]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-[#0F0F14] text-lg">
+              {formData.firstName} {formData.lastName}
+            </p>
+            <div className="flex items-center gap-2 text-sm text-[#9898AA] mt-0.5">
+              <MapPin className="w-3.5 h-3.5" />
+              <span>{formData.country || "Pays non renseigné"}</span>
+            </div>
+          </div>
+          {!isEditing && (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="h-9 px-4 rounded-xl border border-[#E4E4EA] text-xs font-semibold text-[#4A4A5A] hover:border-[#0047FF] hover:text-[#0047FF] transition-all flex-shrink-0 inline-flex items-center gap-1.5"
+            >
+              <PenSquare className="w-3.5 h-3.5" />
+              Modifier
+            </button>
+          )}
         </div>
 
-        {/* Profile Section */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Informations générales</CardTitle>
-            <CardDescription>Vos informations sur Milava.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="flex gap-3 p-3 rounded-lg bg-red-50 border border-red-200">
-                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-600">{error}</p>
-                </div>
-              )}
-
-              {success && (
-                <div className="flex gap-3 p-3 rounded-lg bg-green-50 border border-green-200">
-                  <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-green-600">{success}</p>
-                </div>
-              )}
-
-              <div className="space-y-4 opacity-75 pointer-events-none">
-                <div>
-                  <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                    Email
-                  </label>
-                  <Input
-                    type="email"
-                    value={authUser?.email || ""}
-                    disabled
-                    className="bg-gray-50"
-                  />
-                </div>
+        {/* Form */}
+        {isEditing ? (
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Prénom *</label>
+                <input
+                  name="firstName"
+                  value={formData.firstName}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, firstName: e.target.value }))
+                  }
+                  className={inputCls}
+                  disabled={isSaving}
+                />
               </div>
-
-              <div className="border-t border-[#E4E4EA] pt-4">
-                {!isEditing ? (
-                  <div className="space-y-3">
-                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                      <p className="text-sm text-[#0047FF] font-medium">
-                        {isProfileComplete
-                          ? "✓ Profil complètement rempli"
-                          : "⚠️ Complétez votre profil"}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-[#9898AA] mb-1">
-                          Prénom
-                        </p>
-                        <p className="font-medium text-[#0F0F14]">
-                          {formData.firstName || "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-[#9898AA] mb-1">
-                          Nom
-                        </p>
-                        <p className="font-medium text-[#0F0F14]">
-                          {formData.lastName || "—"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-[#9898AA] mb-1">
-                          Pays
-                        </p>
-                        <p className="font-medium text-[#0F0F14]">
-                          {formData.country || "—"}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-[#9898AA] mb-1">
-                          Téléphone
-                        </p>
-                        <p className="font-medium text-[#0F0F14]">
-                          {formData.phone || "—"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-xs uppercase tracking-wider text-[#9898AA] mb-1">
-                        Bio
-                      </p>
-                      <p className="text-sm text-[#0F0F14]">
-                        {formData.bio || "—"}
-                      </p>
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                      <Button
-                        onClick={() => setIsEditing(true)}
-                        className="flex-1"
-                      >
-                        Modifier
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                          Prénom *
-                        </label>
-                        <Input
-                          type="text"
-                          name="firstName"
-                          value={formData.firstName}
-                          onChange={handleChange}
-                          placeholder="Awa"
-                          disabled={isSaving}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                          Nom *
-                        </label>
-                        <Input
-                          type="text"
-                          name="lastName"
-                          value={formData.lastName}
-                          onChange={handleChange}
-                          placeholder="Fall"
-                          disabled={isSaving}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                        Pays *
-                      </label>
-                      <select
-                        name="country"
-                        value={formData.country}
-                        onChange={handleChange}
-                        disabled={isSaving}
-                        className="w-full px-3 py-2 border border-[#E4E4EA] rounded-lg focus:outline-none focus:border-[#0047FF] bg-white text-[#0F0F14]"
-                      >
-                        <option value="">Sélectionnez un pays</option>
-                        <option value="Sénégal">Sénégal</option>
-                        <option value="Côte d'Ivoire">
-                          Côte d&apos;Ivoire
-                        </option>
-                        <option value="Ghana">Ghana</option>
-                        <option value="Benin">Bénin</option>
-                        <option value="Togo">Togo</option>
-                        <option value="Mali">Mali</option>
-                        <option value="Burkina Faso">Burkina Faso</option>
-                        <option value="Niger">Niger</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                        Bio
-                      </label>
-                      <textarea
-                        name="bio"
-                        value={formData.bio}
-                        onChange={handleChange}
-                        placeholder="Présentez-vous et vos domaines de contenu..."
-                        disabled={isSaving}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-[#E4E4EA] rounded-lg focus:outline-none focus:border-[#0047FF] bg-white text-[#0F0F14] resize-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-[#0F0F14] mb-1">
-                        Téléphone
-                      </label>
-                      <Input
-                        type="tel"
-                        name="phone"
-                        value={formData.phone}
-                        onChange={handleChange}
-                        placeholder="+221 77 123 45 67"
-                        disabled={isSaving}
-                      />
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                      <Button
-                        type="submit"
-                        disabled={isSaving}
-                        className="flex-1"
-                      >
-                        {isSaving && (
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        )}
-                        {isSaving ? "Enregistrement..." : "Enregistrer"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setIsEditing(false)}
-                        disabled={isSaving}
-                        className="flex-1"
-                      >
-                        Annuler
-                      </Button>
-                    </div>
-                  </div>
-                )}
+              <div>
+                <label className={labelCls}>Nom *</label>
+                <input
+                  name="lastName"
+                  value={formData.lastName}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, lastName: e.target.value }))
+                  }
+                  className={inputCls}
+                  disabled={isSaving}
+                />
               </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        {/* Social Accounts Section */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Réseaux sociaux</CardTitle>
-            <CardDescription>
-              Connectez et vérifiez vos comptes pour postuler aux campagnes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {socials.map((social) => (
-              <div
-                key={social.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border border-[#E4E4EA] rounded-xl gap-4"
+            </div>
+            <div>
+              <label className={labelCls}>Pays *</label>
+              <select
+                value={formData.country}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, country: e.target.value }))
+                }
+                className={inputCls}
+                disabled={isSaving}
               >
-                <div className="flex items-center gap-3 flex-1">
-                  <div className="p-2 bg-gray-100 rounded-lg text-[#0F0F14]">
-                    {social.platform === "Instagram" && (
-                      <Instagram className="w-5 h-5" />
-                    )}
-                    {social.platform === "TikTok" && (
-                      <Smartphone className="w-5 h-5" />
-                    )}
-                    {social.platform === "YouTube" && (
-                      <Youtube className="w-5 h-5" />
-                    )}
-                    {social.platform === "Facebook" && (
-                      <Facebook className="w-5 h-5" />
-                    )}
-                    {social.platform === "X" && <Twitter className="w-5 h-5" />}
-                    {social.platform === "Snapchat" && (
-                      <Smartphone className="w-5 h-5" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-[#0F0F14]">
-                      {social.platform}
-                    </p>
-                    <p className="text-sm text-[#4A4A5A]">@{social.username}</p>
-                  </div>
-                </div>
+                <option value="">Sélectionner</option>
+                {countries.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Bio</label>
+              <textarea
+                value={formData.bio}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, bio: e.target.value }))
+                }
+                rows={3}
+                placeholder="Parlez de vous, de votre niche, de votre audience..."
+                className="w-full px-4 py-3 rounded-xl border border-[#E4E4EA] bg-[#F4F4F6] text-sm text-[#0F0F14] placeholder-[#9898AA] outline-none focus:border-[#0047FF] focus:bg-white transition-all resize-none"
+                disabled={isSaving}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Téléphone</label>
+              <input
+                value={formData.phone}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, phone: e.target.value }))
+                }
+                placeholder="+229 XX XX XX XX"
+                className={inputCls}
+                disabled={isSaving}
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                className="h-9 px-4 rounded-xl border border-[#E4E4EA] text-sm font-medium text-[#4A4A5A] hover:bg-[#F4F4F6] transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving}
+                className="h-9 px-5 rounded-xl bg-[#0047FF] text-white text-sm font-semibold hover:bg-[#0038CC] disabled:opacity-60 transition-all flex items-center gap-2"
+              >
+                {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Enregistrer
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="px-6 py-5 space-y-4">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-[#E9ECF3] bg-[#FAFBFF] px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9898AA] mb-1">
+                  Pays
+                </p>
+                <p className="text-sm font-semibold text-[#0F0F14] inline-flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-[#0047FF]" />
+                  {formData.country || "—"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-[#E9ECF3] bg-[#FAFBFF] px-3 py-2.5">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9898AA] mb-1">
+                  Téléphone
+                </p>
+                <p className="text-sm font-semibold text-[#0F0F14] inline-flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-[#0047FF]" />
+                  {formData.phone || "—"}
+                </p>
+              </div>
+            </div>
+            {formData.bio ? (
+              <p className="text-sm text-[#4A4A5A] leading-relaxed">
+                {formData.bio}
+              </p>
+            ) : (
+              <p className="text-sm text-[#9898AA] italic">
+                Aucune bio renseignée.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
-                {social.is_verified ? (
-                  <div className="flex items-center gap-3 flex-1 sm:flex-none sm:justify-end">
-                    <div className="text-right text-sm">
-                      <p className="font-bold text-[#0F0F14]">
-                        {social.followers_count.toLocaleString()}
+      {/* Social accounts */}
+      <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_8px_24px_rgba(15,15,20,0.06)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#E4E4EA] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-[#0047FF]" />
+            <h2 className="font-bold text-[#0F0F14]">
+              Réseaux sociaux vérifiés
+            </h2>
+          </div>
+          {!isAddingSocial && (
+            <button
+              onClick={() => setIsAddingSocial(true)}
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[#EEF4FF] text-[#0047FF] text-xs font-semibold hover:bg-[#ddeaff] transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Ajouter
+            </button>
+          )}
+        </div>
+
+        {/* Add social form */}
+        {isAddingSocial && (
+          <form
+            onSubmit={handleAddSocial}
+            className="px-6 py-4 border-b border-[#E4E4EA] bg-[#FAFBFE] space-y-3"
+          >
+            <p className="text-xs font-semibold text-[#0047FF]">
+              Nouveau réseau social
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Plateforme</label>
+                <select
+                  value={newSocial.platform}
+                  onChange={(e) =>
+                    setNewSocial((p) => ({
+                      ...p,
+                      platform: e.target.value as any,
+                    }))
+                  }
+                  className={inputCls}
+                >
+                  {platforms.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>URL du profil</label>
+                <input
+                  type="url"
+                  value={newSocial.profile_url}
+                  onChange={(e) =>
+                    setNewSocial((p) => ({ ...p, profile_url: e.target.value }))
+                  }
+                  placeholder="https://tiktok.com/@username"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setIsAddingSocial(false)}
+                className="h-9 px-4 rounded-xl border border-[#E4E4EA] text-xs font-semibold text-[#4A4A5A]"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={isSaving || !newSocial.profile_url}
+                className="h-9 px-4 rounded-xl bg-[#0047FF] text-white text-xs font-semibold disabled:opacity-60 flex items-center gap-1.5"
+              >
+                {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Générer le code
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Social list */}
+        {socials.length === 0 && !isAddingSocial ? (
+          <div className="px-6 py-10 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#EEF4FF] flex items-center justify-center mx-auto mb-3">
+              <Shield className="w-5 h-5 text-[#0047FF]" />
+            </div>
+            <p className="text-sm font-semibold text-[#0F0F14] mb-1">
+              Aucun réseau vérifié
+            </p>
+            <p className="text-xs text-[#9898AA] mb-4">
+              Ajoutez vos réseaux pour postuler aux campagnes
+            </p>
+            <button
+              onClick={() => setIsAddingSocial(true)}
+              className="h-9 px-4 rounded-xl bg-[#0047FF] text-white text-xs font-semibold hover:bg-[#0038CC] transition-all"
+            >
+              Ajouter un réseau
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#E4E4EA]">
+            {socials.map((s) => (
+              <div key={s.id} className="px-6 py-4">
+                {/* Verification panel */}
+                {verifyingId === s.id ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      {platformIcon(s.platform)}
+                      <p className="font-semibold text-[#0F0F14] text-sm">
+                        {s.username}
                       </p>
-                      <p className="text-xs text-[#4A4A5A]">abonnés</p>
+                      <span className="text-xs text-[#9898AA]">
+                        · Vérification en cours
+                      </span>
                     </div>
-                    <Badge className="bg-green-100 text-green-700 flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3" /> Vérifié
-                    </Badge>
-                  </div>
-                ) : verifyingId === social.id ? (
-                  <div className="flex flex-col gap-3 flex-1 sm:flex-none w-full sm:w-auto">
-                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200 space-y-3">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 text-sm text-[#0F0F14]">
-                          <span className="font-medium">1.</span>
-                          <span>Copiez ce code :</span>
-                        </div>
-                        <div className="flex gap-2">
-                          <code className="flex-1 bg-white px-3 py-2 rounded font-mono font-bold text-[#0047FF] text-center border border-[#0047FF]">
-                            {verificationCode}
-                          </code>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={copyToClipboard}
-                            className="px-2"
-                          >
-                            {copiedCode ? (
-                              <Check className="w-4 h-4" />
-                            ) : (
-                              <Copy className="w-4 h-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
 
-                      <div className="text-sm text-[#0F0F14]">
-                        <p className="font-medium">
-                          2. Ajoutez le code à votre bio
+                    <div className="bg-[#0047FF] rounded-xl p-4 text-center">
+                      <p className="text-white/60 text-xs mb-2">
+                        Collez ce code dans votre bio {s.platform}
+                      </p>
+                      <p className="text-white text-2xl font-bold font-mono tracking-widest">
+                        {verificationCode}
+                      </p>
+                      {s.verification_expires_at && (
+                        <p className="text-white/50 text-xs mt-2 flex items-center justify-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          Expire le{" "}
+                          {new Date(
+                            s.verification_expires_at,
+                          ).toLocaleDateString("fr-FR")}
                         </p>
-                        <p className="text-xs text-[#4A4A5A] mt-1">
-                          Vous avez 48h pour le vérifier
-                        </p>
-                      </div>
-
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => handleVerify(social.id)}
-                      >
-                        Vérifier maintenant
-                      </Button>
-
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="w-full"
-                        onClick={() => setVerifyingId(null)}
-                      >
-                        Annuler
-                      </Button>
+                      )}
                     </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={copyCode}
+                        className={`flex-1 h-10 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${copiedCode ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-[#E4E4EA] bg-[#F4F4F6] text-[#4A4A5A] hover:border-[#0047FF]"}`}
+                      >
+                        {copiedCode ? (
+                          <Check className="w-4 h-4" />
+                        ) : (
+                          <Copy className="w-4 h-4" />
+                        )}
+                        {copiedCode ? "Copié !" : "Copier le code"}
+                      </button>
+                      <button
+                        onClick={() => handleVerify(s.id)}
+                        className="flex-1 h-10 rounded-xl bg-[#0047FF] text-white text-sm font-semibold hover:bg-[#0038CC] transition-all"
+                      >
+                        J'ai ajouté le code →
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setVerifyingId(null)}
+                      className="w-full text-xs text-[#9898AA] hover:text-[#4A4A5A] text-center transition-colors"
+                    >
+                      Annuler
+                    </button>
                   </div>
                 ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleVerifyClick(social)}
-                    className="flex-1 sm:flex-none"
-                  >
-                    Vérifier
-                  </Button>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${s.is_verified ? "bg-[#EEF4FF] text-[#0047FF]" : "bg-[#F4F4F6] text-[#9898AA]"}`}
+                      >
+                        {platformIcon(s.platform)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-[#0F0F14] text-sm">
+                            @{s.username}
+                          </p>
+                          {s.is_verified ? (
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Vérifié
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                              <Clock className="w-3 h-3" />
+                              En attente
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#9898AA]">
+                          {s.platform}
+                          {s.is_verified &&
+                            s.followers_count > 0 &&
+                            ` · ${formatFollowers(s.followers_count)} abonnés`}
+                          {s.is_verified &&
+                            s.engagement_rate > 0 &&
+                            ` · ${s.engagement_rate.toFixed(1)}% engagement`}
+                        </p>
+                      </div>
+                    </div>
+                    {!s.is_verified && (
+                      <button
+                        onClick={() => handleVerifyClick(s)}
+                        className="h-8 px-3 rounded-lg bg-[#EEF4FF] text-[#0047FF] text-xs font-semibold hover:bg-[#ddeaff] transition-colors flex-shrink-0"
+                      >
+                        Vérifier
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             ))}
-
-            {isAddingSocial ? (
-              <form
-                onSubmit={handleAddSocial}
-                className="p-4 border border-[#E4E4EA] rounded-xl space-y-4 bg-gray-50"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-[#0F0F14]">
-                      Plateforme *
-                    </label>
-                    <select
-                      className="w-full px-3 py-2 border border-[#E4E4EA] rounded-lg focus:outline-none focus:border-[#0047FF] bg-white text-[#0F0F14]"
-                      value={newSocial.platform}
-                      onChange={(e) =>
-                        setNewSocial({
-                          ...newSocial,
-                          platform: e.target.value as any,
-                        })
-                      }
-                    >
-                      <option value="Instagram">Instagram</option>
-                      <option value="TikTok">TikTok</option>
-                      <option value="YouTube">YouTube</option>
-                      <option value="Facebook">Facebook</option>
-                      <option value="X">X (Twitter)</option>
-                      <option value="Snapchat">Snapchat</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-[#0F0F14]">
-                      URL du profil *
-                    </label>
-                    <Input
-                      placeholder="https://instagram.com/username"
-                      value={newSocial.profile_url}
-                      onChange={(e) =>
-                        setNewSocial({
-                          ...newSocial,
-                          profile_url: e.target.value,
-                        })
-                      }
-                      disabled={isSaving}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2 justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setIsAddingSocial(false)}
-                    disabled={isSaving}
-                  >
-                    Annuler
-                  </Button>
-                  <Button type="submit" disabled={isSaving}>
-                    {isSaving && (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    )}
-                    Ajouter
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-dashed"
-                onClick={() => setIsAddingSocial(true)}
-              >
-                <Plus className="w-4 h-4 mr-2" /> Ajouter un réseau
-              </Button>
-            )}
-
-            {/* Progress Indicator */}
-            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 text-sm text-[#0047FF]">
-              <p className="font-medium">Progression du profil :</p>
-              <div className="mt-2 space-y-1 text-xs">
-                <div className="flex items-center gap-2">
-                  {isProfileComplete ? (
-                    <Check className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <Clock className="w-4 h-4" />
-                  )}
-                  Informations personelles
-                </div>
-                <div className="flex items-center gap-2">
-                  {hasSocials ? (
-                    <Check className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <Clock className="w-4 h-4" />
-                  )}
-                  Au moins 1 réseau social ajouté
-                </div>
-                <div className="flex items-center gap-2">
-                  {hasVerifiedSocials ? (
-                    <Check className="w-4 h-4 text-green-600" />
-                  ) : (
-                    <Clock className="w-4 h-4" />
-                  )}
-                  Au moins 1 réseau vérifié
-                </div>
-              </div>
-
-              {isProfileComplete && hasSocials && hasVerifiedSocials && (
-                <Button
-                  type="button"
-                  onClick={handleContinue}
-                  className="w-full mt-3"
-                >
-                  Continuer vers le tableau de bord
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        )}
       </div>
-    </main>
-  );
-}
-
-function generateVerificationCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "MV";
-  for (let i = 0; i < 4; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-function extractUsername(url: string): string {
-  return (
-    url
-      .split("/")
-      .filter((part) => part)
-      .pop() || url
+    </div>
   );
 }

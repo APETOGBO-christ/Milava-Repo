@@ -35,7 +35,12 @@ export default function AdminDashboard() {
           .from("withdrawal_requests")
           .select("*");
 
+        const { data: transactions, error: txError } = await supabase
+          .from("payment_transactions")
+          .select("fee");
+
         if (withdrawalError) throw withdrawalError;
+        if (txError) throw txError;
 
         if (withdrawals) {
           const pending = withdrawals.filter(
@@ -53,13 +58,17 @@ export default function AdminDashboard() {
             (sum: number, w: any) => sum + parseInt(w.amount || 0),
             0,
           );
+          const totalFees = (transactions || []).reduce(
+            (sum: number, t: any) => sum + Number(t.fee || 0),
+            0,
+          );
 
           setStats({
             totalWithdrawals: withdrawals.length,
             pendingApprovals: pending,
             completedToday,
             totalProcessed,
-            totalFees: 0, // TODO: Calculate from transactions
+            totalFees,
           });
         }
       } catch (err) {

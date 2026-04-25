@@ -51,10 +51,19 @@ export async function GET(request: NextRequest) {
 
     // Get transaction stats
     const stats = await paymentTransactionService.getTransactionStats();
+    const adminSupabase = createAdminSupabaseClient();
+
+    const [{ data: monthlyData }, { data: providerBreakdown }] =
+      await Promise.all([
+        adminSupabase.rpc("admin_monthly_withdrawals", { p_months: 6 }),
+        adminSupabase.rpc("admin_provider_breakdown"),
+      ]);
 
     return NextResponse.json({
       success: true,
       stats,
+      monthlyData: monthlyData || [],
+      providerBreakdown: providerBreakdown || [],
     });
   } catch (error) {
     console.error("Analytics API error:", error);

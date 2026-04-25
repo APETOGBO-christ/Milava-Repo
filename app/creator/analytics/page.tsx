@@ -6,29 +6,39 @@ import { useCampaigns } from "@/hooks/use-campaigns";
 import { usePosts } from "@/hooks/use-posts";
 import { Campaign } from "@/lib/supabase/campaigns";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
   DollarSign,
   TrendingUp,
   Eye,
   MousePointer,
-  Users,
-  Target,
   Loader2,
   ExternalLink,
   Calendar,
-  Check,
+  CheckCircle2,
   Clock,
   X,
 } from "lucide-react";
 import Link from "next/link";
+
+const CREATOR_ANALYTICS_CACHE_TTL_MS = 30 * 1000;
+type CreatorAnalyticsCacheEntry = {
+  campaigns: Campaign[];
+  postsData: Array<{ post: any; metrics: any; gains: any }>;
+  totalGains: number;
+  ts: number;
+};
+const creatorAnalyticsCache = new Map<string, CreatorAnalyticsCacheEntry>();
+
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  pending_review: {
+    label: "En attente",
+    color: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  approved: {
+    label: "Approuvé",
+    color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  },
+  rejected: { label: "Refusé", color: "bg-red-50 text-red-600 border-red-200" },
+};
 
 export default function AnalyticsPage() {
   const { authUser } = useAuth();
@@ -37,300 +47,264 @@ export default function AnalyticsPage() {
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [postsData, setPostsData] = useState<
-    Array<{
-      post: any;
-      metrics: any;
-      gains: any;
-    }>
+    Array<{ post: any; metrics: any; gains: any }>
   >([]);
   const [totalGains, setTotalGains] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Load data
+  const refreshFromServer = useCallback(
+    async (showMainLoader: boolean) => {
+      if (!authUser) return;
+      if (showMainLoader) {
+        setLoading(true);
+      }
+
+      try {
+        const [allCampaigns, posts, gains] = await Promise.all([
+          getActiveCampaigns(100, 0),
+          getCreatorPostsWithMetrics(authUser.id),
+          getCreatorTotalGains(authUser.id),
+        ]);
+        setCampaigns(allCampaigns);
+        setPostsData(posts);
+        setTotalGains(gains);
+
+        creatorAnalyticsCache.set(authUser.id, {
+          campaigns: allCampaigns,
+          postsData: posts,
+          totalGains: gains,
+          ts: Date.now(),
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (showMainLoader) {
+          setLoading(false);
+        }
+      }
+    },
+    [
+      authUser,
+      getActiveCampaigns,
+      getCreatorPostsWithMetrics,
+      getCreatorTotalGains,
+    ],
+  );
+
   const loadData = useCallback(async () => {
     if (!authUser) return;
+    const cached = creatorAnalyticsCache.get(authUser.id);
+    const isFresh =
+      cached && Date.now() - cached.ts < CREATOR_ANALYTICS_CACHE_TTL_MS;
 
-    try {
-      // Get all campaigns (for reference)
-      const allCampaigns = await getActiveCampaigns(100, 0);
-      setCampaigns(allCampaigns);
-
-      // Get creator's posts with metrics
-      const posts = await getCreatorPostsWithMetrics(authUser.id);
-      setPostsData(posts);
-
-      // Get total gains
-      const gains = await getCreatorTotalGains(authUser.id);
-      setTotalGains(gains);
-    } catch (error) {
-      console.error("Error loading analytics:", error);
-    } finally {
+    if (isFresh) {
+      setCampaigns(cached.campaigns);
+      setPostsData(cached.postsData);
+      setTotalGains(cached.totalGains);
       setLoading(false);
+      void refreshFromServer(false);
+      return;
     }
-  }, [
-    authUser,
-    getActiveCampaigns,
-    getCreatorPostsWithMetrics,
-    getCreatorTotalGains,
-  ]);
+
+    await refreshFromServer(true);
+  }, [authUser, refreshFromServer]);
 
   useEffect(() => {
     loadData();
   }, [authUser, loadData]);
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<
-      string,
-      { bg: string; text: string; icon: React.ReactNode; label: string }
-    > = {
-      submitted: {
-        bg: "bg-yellow-100",
-        text: "text-yellow-700",
-        icon: <Clock className="w-3 h-3" />,
-        label: "Soumis",
-      },
-      approved: {
-        bg: "bg-green-100",
-        text: "text-green-700",
-        icon: <Check className="w-3 h-3" />,
-        label: "Approuvé",
-      },
-      auto_approved: {
-        bg: "bg-green-100",
-        text: "text-green-700",
-        icon: <Check className="w-3 h-3" />,
-        label: "Auto-approuvé",
-      },
-      rejected: {
-        bg: "bg-red-100",
-        text: "text-red-700",
-        icon: <X className="w-3 h-3" />,
-        label: "Rejeté",
-      },
-    };
-
-    const style = styles[status] || styles.submitted;
-
-    return (
-      <Badge className={`${style.bg} ${style.text} gap-1`}>
-        {style.icon}
-        {style.label}
-      </Badge>
-    );
-  };
+  const totalViews = postsData.reduce(
+    (s, p) => s + (p.metrics?.views_count || 0),
+    0,
+  );
+  const totalClicks = postsData.reduce(
+    (s, p) => s + (p.metrics?.clicks_count || 0),
+    0,
+  );
+  const approvedCount = postsData.filter(
+    (p) => p.post.status === "approved",
+  ).length;
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#0047FF]" />
       </div>
     );
   }
 
-  // Get campaign map for reference
-  const campaignMap = new Map(campaigns.map((c) => [c.id, c]));
+  const kpis = [
+    {
+      label: "Gains totaux",
+      value: `$${totalGains.toFixed(2)}`,
+      sub: "USD validés",
+      icon: DollarSign,
+      accent: true,
+    },
+    {
+      label: "Vues générées",
+      value:
+        totalViews >= 1000
+          ? `${(totalViews / 1000).toFixed(1)}K`
+          : totalViews.toString(),
+      sub: "toutes campagnes",
+      icon: Eye,
+    },
+    {
+      label: "Clics trackés",
+      value: totalClicks.toString(),
+      sub: "via liens Milava",
+      icon: MousePointer,
+    },
+    {
+      label: "Posts approuvés",
+      value: approvedCount.toString(),
+      sub: `sur ${postsData.length} soumis`,
+      icon: CheckCircle2,
+    },
+  ];
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Tableau de bord Analytics</h1>
-        <p className="text-gray-600">
-          Suivez vos performances et vos gains sur toutes les campagnes
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9898AA] mb-1">
+          Performance
         </p>
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-[-0.03em] text-[#0F0F14]">
+          Mes analytics
+        </h1>
       </div>
 
-      {/* Earnings Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        {/* Total Gains */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Gains totaux</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {totalGains.toLocaleString("fr-FR", {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0,
-              })}{" "}
-              FCFA
+      {/* KPI grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {kpis.map((k, i) => {
+          const Icon = k.icon;
+          return (
+            <div
+              key={i}
+              className={`rounded-2xl border p-5 shadow-[0_2px_12px_rgba(15,15,20,0.04)] ${k.accent ? "bg-[#0047FF] border-[#0047FF]" : "bg-white border-[#E4E4EA]"}`}
+            >
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center mb-3 ${k.accent ? "bg-white/20" : "bg-[#EEF4FF]"}`}
+              >
+                <Icon
+                  className={`w-4 h-4 ${k.accent ? "text-white" : "text-[#0047FF]"}`}
+                />
+              </div>
+              <p
+                className={`text-2xl font-bold tracking-tight ${k.accent ? "text-white" : "text-[#0F0F14]"}`}
+              >
+                {k.value}
+              </p>
+              <p
+                className={`text-xs mt-0.5 ${k.accent ? "text-white/60" : "text-[#9898AA]"}`}
+              >
+                {k.sub}
+              </p>
+              <p
+                className={`text-xs font-medium mt-2 ${k.accent ? "text-white/80" : "text-[#4A4A5A]"}`}
+              >
+                {k.label}
+              </p>
             </div>
-            <p className="text-xs text-gray-500 mt-1">Tous les temps</p>
-          </CardContent>
-        </Card>
+          );
+        })}
+      </div>
 
-        {/* Posts Count */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Contenus soumis
-            </CardTitle>
-            <TrendingUp className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{postsData.length}</div>
-            <p className="text-xs text-gray-500 mt-1">
-              {
-                postsData.filter((p) =>
-                  ["approved", "auto_approved"].includes(p.post.status),
-                ).length
-              }{" "}
-              approuvés
+      {/* Posts list */}
+      <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_2px_12px_rgba(15,15,20,0.04)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#E4E4EA]">
+          <h2 className="font-bold text-[#0F0F14]">Mes posts soumis</h2>
+        </div>
+
+        {postsData.length === 0 ? (
+          <div className="px-6 py-16 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#EEF4FF] flex items-center justify-center mx-auto mb-4">
+              <TrendingUp className="w-5 h-5 text-[#0047FF]" />
+            </div>
+            <p className="text-sm font-semibold text-[#0F0F14] mb-1">
+              Aucun post soumis
             </p>
-          </CardContent>
-        </Card>
+            <p className="text-xs text-[#9898AA] mb-5">
+              Postule à des campagnes et soumets ton contenu pour voir tes stats
+              ici.
+            </p>
+            <Link
+              href="/creator/dashboard"
+              className="inline-flex items-center gap-2 h-9 px-4 rounded-xl bg-[#0047FF] text-white text-xs font-semibold hover:bg-[#0038CC] transition-all"
+            >
+              Voir les campagnes
+            </Link>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#E4E4EA]">
+            {postsData.map(({ post, metrics, gains }) => {
+              const campaign = campaigns.find((c) => c.id === post.campaign_id);
+              const st =
+                STATUS_CONFIG[post.status] || STATUS_CONFIG.pending_review;
+              return (
+                <div
+                  key={post.id}
+                  className="px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-4"
+                >
+                  {/* Campaign + URL */}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <p className="font-semibold text-[#0F0F14] text-sm truncate">
+                      {campaign?.title || "Campagne inconnue"}
+                    </p>
+                    <a
+                      href={post.post_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-[#0047FF] hover:underline"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Voir le post
+                    </a>
+                    <p className="text-xs text-[#9898AA] flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      {new Date(post.submitted_at).toLocaleDateString("fr-FR", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                    </p>
+                  </div>
 
-        {/* Average Engagement */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Engagement moyen
-            </CardTitle>
-            <Eye className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {postsData.length > 0
-                ? Math.round(
-                    postsData.reduce(
-                      (sum, p) => sum + (p.metrics?.engagements || 0),
-                      0,
-                    ) / postsData.length,
-                  )
-                : 0}
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Interactions totales</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Posts Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Historique des contenus</CardTitle>
-          <CardDescription>
-            Liste complète de tous vos contenus soumis et leurs performances
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {postsData.length === 0 ? (
-            <div className="text-center py-12">
-              <TrendingUp className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-600 font-medium mb-2">
-                Aucun contenu soumis
-              </p>
-              <p className="text-gray-500 text-sm mb-6">
-                Explorez le marché et soumettez du contenu pour des campagnes
-              </p>
-              <Link href="/creator/marketplace">
-                <Button>Explorer les campagnes</Button>
-              </Link>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {postsData.map(({ post, metrics, gains }) => {
-                const campaign = campaignMap.get(post.campaign_id);
-
-                return (
-                  <div
-                    key={post.id}
-                    className="border rounded-lg p-4 hover:bg-gray-50 transition"
-                  >
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                      {/* Left: Campaign & Post Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-2">
-                          <h3 className="font-semibold text-gray-900 truncate">
-                            {campaign?.title || "Campagne supprimée"}
-                          </h3>
-                          {getStatusBadge(post.status)}
-                        </div>
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm text-gray-600">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" />
-                            {new Date(post.submitted_at).toLocaleDateString(
-                              "fr-FR",
-                            )}
-                          </div>
-                          <a
-                            href={post.content_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-blue-500 hover:underline"
-                          >
-                            Voir le contenu
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-                      </div>
-
-                      {/* Middle: Metrics */}
-                      {metrics && (
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
-                          <div>
-                            <p className="text-xs text-gray-500">Vues</p>
-                            <p className="font-bold text-gray-900">
-                              {metrics.impressions.toLocaleString()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-500">Clics</p>
-                            <p className="font-bold text-gray-900">
-                              {metrics.clicks.toLocaleString()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-500">Leads</p>
-                            <p className="font-bold text-gray-900">
-                              {metrics.leads.toLocaleString()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-500">Conversions</p>
-                            <p className="font-bold text-gray-900">
-                              {metrics.conversions.toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Right: Gains */}
-                      <div className="text-right">
-                        <p className="text-xs text-gray-500">Gains</p>
-                        <p className="text-lg font-bold text-green-600">
-                          {gains
-                            ? gains.total_gain.toLocaleString("fr-FR", {
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 0,
-                              })
-                            : "N/A"}{" "}
-                          FCFA
-                        </p>
-                        {gains && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {gains.reward_model}
-                          </p>
-                        )}
-                      </div>
+                  {/* Metrics */}
+                  <div className="flex gap-4 sm:gap-6 text-xs">
+                    <div className="text-center">
+                      <p className="font-bold text-[#0F0F14]">
+                        {(metrics?.views_count || 0).toLocaleString()}
+                      </p>
+                      <p className="text-[#9898AA]">Vues</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="font-bold text-[#0F0F14]">
+                        {(metrics?.clicks_count || 0).toLocaleString()}
+                      </p>
+                      <p className="text-[#9898AA]">Clics</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="font-bold text-[#0047FF]">
+                        ${(gains?.amount || 0).toFixed(2)}
+                      </p>
+                      <p className="text-[#9898AA]">Gains</p>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Bottom CTA */}
-      {postsData.length > 0 && (
-        <div className="mt-8 text-center">
-          <Link href="/creator/marketplace">
-            <Button className="bg-blue-500 hover:bg-blue-600">
-              Soumettre plus de contenu
-            </Button>
-          </Link>
-        </div>
-      )}
+                  {/* Status */}
+                  <span
+                    className={`self-start sm:self-auto text-xs font-semibold px-3 py-1.5 rounded-full border flex-shrink-0 ${st.color}`}
+                  >
+                    {st.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

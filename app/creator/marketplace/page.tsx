@@ -4,16 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useCampaigns } from "@/hooks/use-campaigns";
 import { Campaign } from "@/lib/supabase/campaigns";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { UnifiedCampaignCard } from "@/components/campaigns/unified-campaign-card";
+import { CampaignApplyDialog } from "@/components/campaigns/campaign-apply-dialog";
 import {
   Dialog,
   DialogContent,
@@ -21,26 +16,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Loader2,
-  Search,
-  MapPin,
-  Users,
-  DollarSign,
-  TrendingUp,
-  AlertCircle,
-  Check,
-} from "lucide-react";
+import { Loader2, Search, TrendingUp, Check } from "lucide-react";
 
 export default function CreatorMarketplacePage() {
-  const { authUser, userProfile } = useAuth();
-  const {
-    getActiveCampaigns,
-    createCandidature,
-    getCreatorCandidatures,
-    loading,
-    error,
-  } = useCampaigns();
+  const { authUser } = useAuth();
+  const { createCandidature, getCreatorCandidatures } = useCampaigns();
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [candidatures, setCandidatures] = useState<string[]>([]); // campaign IDs already applied to
@@ -48,6 +28,7 @@ export default function CreatorMarketplacePage() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(
     null,
   );
+  const [applyCampaign, setApplyCampaign] = useState<Campaign | null>(null);
   const [loadingCampaigns, setLoadingCampaigns] = useState(true);
   const [appliedLoading, setAppliedLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
@@ -55,37 +36,58 @@ export default function CreatorMarketplacePage() {
   // Load campaigns and candidatures on mount
   const loadData = useCallback(async () => {
     setLoadingCampaigns(true);
-    const activeCampaigns = await getActiveCampaigns(50, 0);
-    setCampaigns(activeCampaigns);
+    try {
+      const response = await fetch("/api/public/campaigns/active?limit=50", {
+        method: "GET",
+      });
+
+      const payload = await response.json();
+      if (response.ok) {
+        setCampaigns((payload?.campaigns as Campaign[]) || []);
+      } else {
+        setCampaigns([]);
+      }
+    } catch {
+      setCampaigns([]);
+    }
 
     if (authUser) {
       const creatorCandidatures = await getCreatorCandidatures(authUser.id);
       setCandidatures(creatorCandidatures.map((c) => c.campaign_id));
     }
     setLoadingCampaigns(false);
-  }, [authUser, getActiveCampaigns, getCreatorCandidatures]);
+  }, [authUser, getCreatorCandidatures]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
-  const handleApply = async (campaign: Campaign) => {
+  const submitCandidature = async (
+    campaign: Campaign,
+    _payload: { contentLink: string; network: string },
+  ) => {
     if (!authUser) {
-      alert("Veuillez vous connecter");
-      return;
+      throw new Error("Veuillez vous connecter.");
     }
 
     setAppliedLoading(true);
     const candidature = await createCandidature(campaign.id, authUser.id);
     setAppliedLoading(false);
 
-    if (candidature) {
-      setCandidatures([...candidatures, campaign.id]);
-      setSuccessMessage("Candidature envoyée avec succès!");
-      setTimeout(() => setSuccessMessage(""), 3000);
-      setSelectedCampaign(null);
+    if (!candidature) {
+      throw new Error("Impossible d'envoyer la candidature.");
     }
+
+    setCandidatures((prev) =>
+      prev.includes(campaign.id) ? prev : [...prev, campaign.id],
+    );
+    setSuccessMessage("Candidature envoyee avec succes.");
+    setTimeout(() => setSuccessMessage(""), 3000);
+  };
+
+  const openApplyDialog = (campaign: Campaign) => {
+    setApplyCampaign(campaign);
   };
 
   const hasApplied = (campaignId: string) => candidatures.includes(campaignId);
@@ -96,15 +98,96 @@ export default function CreatorMarketplacePage() {
       c.description.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  const getRewardModelLabel = (model: string) => {
+  const getRewardUnit = (model: string) => {
     const labels: Record<string, string> = {
-      CPM: "Par 1000 vues",
-      CPC: "Par clic",
-      CPL: "Par inscription",
-      CPA: "Par action",
-      "Flat Rate": "Tarif forfaitaire",
+      CPM: "/1K vues",
+      CPC: "/clic",
+      CPL: "/lead",
+      CPA: "/action",
+      "Flat Rate": "/post",
+      cpm: "/1K vues",
+      cpc: "/clic",
+      cpl: "/lead",
+      cpa: "/action",
+      flat_rate: "/post",
     };
+    return labels[model] || "";
+  };
+
+  const getRewardLabel = (model: string) => {
+    const labels: Record<string, string> = {
+      CPM: "CPM",
+      CPC: "CPC",
+      CPL: "CPL",
+      CPA: "CPA",
+      "Flat Rate": "Flat Rate",
+      cpm: "CPM",
+      cpc: "CPC",
+      cpl: "CPL",
+      cpa: "CPA",
+      flat_rate: "Flat Rate",
+    };
+
     return labels[model] || model;
+  };
+
+  const getCompanyName = (campaign: Campaign) => {
+    const withMeta = campaign as Campaign & {
+      company_name?: string;
+      company?: string;
+      brand?: string;
+    };
+    return (
+      withMeta.company_name ||
+      withMeta.company ||
+      withMeta.brand ||
+      "Marque verifiee"
+    );
+  };
+
+  const getCampaignNiche = (campaign: Campaign) => {
+    const withMeta = campaign as Campaign & {
+      niche?: string;
+      category?: string;
+    };
+    return withMeta.niche || withMeta.category || "Influence";
+  };
+
+  const getCampaignNetworks = (campaign: Campaign) => {
+    const withMeta = campaign as Campaign & {
+      required_networks?: unknown;
+      networks?: unknown;
+      platforms?: unknown;
+    };
+
+    const values = [
+      withMeta.required_networks,
+      withMeta.networks,
+      withMeta.platforms,
+    ];
+    for (const value of values) {
+      if (Array.isArray(value)) {
+        const list = value
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+        if (list.length > 0) {
+          return list;
+        }
+      }
+    }
+
+    return ["Instagram", "TikTok", "Facebook"];
+  };
+
+  const getParticipantCount = (campaign: Campaign) => {
+    const withMeta = campaign as Campaign & {
+      participant_count?: number;
+      participants?: number;
+    };
+    const count = withMeta.participant_count ?? withMeta.participants ?? 0;
+    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
   };
 
   if (loadingCampaigns) {
@@ -127,7 +210,7 @@ export default function CreatorMarketplacePage() {
             Marketplace de Campagnes
           </h1>
           <p className="text-[#4A4A5A] mt-1">
-            Trouvez et candidatez à des campagnes d&apos;influence
+            Trouvez et candidatez a des campagnes d&apos;influence
           </p>
         </div>
 
@@ -163,104 +246,35 @@ export default function CreatorMarketplacePage() {
               <p className="text-[#4A4A5A]">
                 {campaigns.length === 0
                   ? "Aucune campagne disponible pour le moment"
-                  : "Aucune campagne ne correspond à votre recherche"}
+                  : "Aucune campagne ne correspond a votre recherche"}
               </p>
             </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {filteredCampaigns.map((campaign) => (
-              <Card key={campaign.id} className="flex flex-col">
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <CardTitle className="text-xl">
-                        {campaign.title}
-                      </CardTitle>
-                      <CardDescription className="line-clamp-2 mt-1">
-                        {campaign.description}
-                      </CardDescription>
-                    </div>
-                    {hasApplied(campaign.id) && (
-                      <Badge className="bg-green-100 text-green-700">
-                        <Check className="w-3 h-3 mr-1" />
-                        Candidature envoyée
-                      </Badge>
-                    )}
-                  </div>
-                </CardHeader>
-
-                <CardContent className="flex-1 space-y-4">
-                  {/* Reward Model & Value */}
-                  <div className="grid grid-cols-2 gap-4 p-3 bg-[#F9F9FC] rounded-lg">
-                    <div>
-                      <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                        Type de Rémunération
-                      </p>
-                      <p className="font-medium text-[#0F0F14]">
-                        {campaign.reward_model}
-                      </p>
-                      <p className="text-xs text-[#4A4A5A]">
-                        {getRewardModelLabel(campaign.reward_model)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                        Tarif
-                      </p>
-                      <p className="font-medium text-[#0047FF] text-lg">
-                        {campaign.reward_value}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Budget */}
-                  <div className="flex items-center gap-3 p-3 bg-[#F9F9FC] rounded-lg">
-                    <DollarSign className="w-5 h-5 text-[#0047FF]" />
-                    <div>
-                      <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                        Budget Disponible
-                      </p>
-                      <p className="font-bold text-[#0F0F14] text-lg">
-                        {campaign.budget_usable.toLocaleString("fr-FR")} FCFA
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Objectives Preview */}
-                  <div>
-                    <p className="text-sm font-medium text-[#0F0F14] mb-2">
-                      Objectifs
-                    </p>
-                    <p className="text-sm text-[#4A4A5A] line-clamp-2">
-                      {campaign.objectives}
-                    </p>
-                  </div>
-                </CardContent>
-
-                {/* Action Buttons */}
-                <CardContent className="border-t border-[#E4E4EA] pt-4 space-y-3">
-                  <Button
-                    onClick={() => setSelectedCampaign(campaign)}
-                    variant="secondary"
-                    className="w-full"
-                  >
-                    Voir les détails
-                  </Button>
-                  <Button
-                    onClick={() => handleApply(campaign)}
-                    disabled={hasApplied(campaign.id) || appliedLoading}
-                    className="w-full"
-                  >
-                    {appliedLoading ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : null}
-                    {hasApplied(campaign.id)
-                      ? "Vous avez candidaté"
-                      : "Candidater"}
-                  </Button>
-                </CardContent>
-              </Card>
+              <UnifiedCampaignCard
+                key={campaign.id}
+                variant="marketplace"
+                company={getCompanyName(campaign)}
+                niche={getCampaignNiche(campaign)}
+                title={campaign.title}
+                description={campaign.description}
+                mode={getRewardLabel(campaign.reward_model)}
+                rate={`$${campaign.reward_value}`}
+                unit={getRewardUnit(campaign.reward_model)}
+                networks={getCampaignNetworks(campaign)}
+                budgetRemaining={campaign.budget_usable}
+                budgetTotal={campaign.budget_total}
+                budgetRemainingLabel={`$${Math.round(campaign.budget_usable).toLocaleString("en-US")}`}
+                budgetTotalLabel={`$${Math.round(campaign.budget_total).toLocaleString("en-US")}`}
+                participantCount={getParticipantCount(campaign)}
+                isApplied={hasApplied(campaign.id)}
+                isApplying={appliedLoading}
+                applyDisabled={hasApplied(campaign.id) || appliedLoading}
+                onViewDetails={() => setSelectedCampaign(campaign)}
+                onApply={() => openApplyDialog(campaign)}
+              />
             ))}
           </div>
         )}
@@ -280,7 +294,7 @@ export default function CreatorMarketplacePage() {
             <div className="space-y-6">
               {/* Reward Model */}
               <div className="p-4 bg-[#F9F9FC] rounded-lg border border-[#E4E4EA] space-y-3">
-                <h3 className="font-medium text-[#0F0F14]">Rémunération</h3>
+                <h3 className="font-medium text-[#0F0F14]">Remuneration</h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-xs text-[#9898AA] uppercase tracking-wide">
@@ -336,21 +350,40 @@ export default function CreatorMarketplacePage() {
 
               {/* Action Button */}
               <Button
-                onClick={() => handleApply(selectedCampaign)}
-                disabled={hasApplied(selectedCampaign.id) || appliedLoading}
-                className="w-full gap-2"
+                onClick={() => {
+                  setSelectedCampaign(null);
+                  openApplyDialog(selectedCampaign);
+                }}
+                disabled={hasApplied(selectedCampaign.id)}
+                className="w-full"
               >
-                {appliedLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : null}
                 {hasApplied(selectedCampaign.id)
-                  ? "Vous avez déjà candidaté"
-                  : "Candidater"}
+                  ? "Vous avez deja postule"
+                  : "Postuler"}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       )}
+
+      {applyCampaign ? (
+        <CampaignApplyDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) {
+              setApplyCampaign(null);
+            }
+          }}
+          campaignCompany={getCompanyName(applyCampaign)}
+          campaignTitle={applyCampaign.title}
+          networkOptions={getCampaignNetworks(applyCampaign)}
+          submitting={appliedLoading}
+          onSubmit={async (payload) => {
+            await submitCandidature(applyCampaign, payload);
+            setApplyCampaign(null);
+          }}
+        />
+      ) : null}
     </main>
   );
 }

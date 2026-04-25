@@ -49,33 +49,14 @@ export default function AdminAnalytics() {
         const data = await response.json();
         const stats = data.stats;
 
-        // Mock monthly data - in production, query from database
-        const mockMonthlyData = [
-          { month: "Jan", amount: 50000, fees: 2500, transactions: 20 },
-          { month: "Feb", amount: 75000, fees: 3750, transactions: 35 },
-          { month: "Mar", amount: 120000, fees: 6000, transactions: 55 },
-          { month: "Apr", amount: 95000, fees: 4750, transactions: 40 },
-          { month: "May", amount: 145000, fees: 7250, transactions: 65 },
-          { month: "Jun", amount: 180000, fees: 9000, transactions: 85 },
-        ];
-
-        // Mock provider breakdown
-        const mockProviderBreakdown = [
-          { provider: "Wave", amount: 320000, percentage: 35 },
-          { provider: "Orange Money", amount: 280000, percentage: 30 },
-          { provider: "MTN MoMo", amount: 215000, percentage: 23 },
-          { provider: "Stripe", amount: 95000, percentage: 10 },
-          { provider: "Bank Transfer", amount: 30000, percentage: 2 },
-        ];
-
         setAnalytics({
           totalWithdrawals: stats.totalAmount,
           totalFees: stats.totalFees,
           completedTransactions: stats.completedCount,
           failedTransactions: stats.failedCount,
           pendingTransactions: stats.pendingCount,
-          monthlyData: mockMonthlyData,
-          providerBreakdown: mockProviderBreakdown,
+          monthlyData: data.monthlyData || [],
+          providerBreakdown: data.providerBreakdown || [],
         });
       } catch (error) {
         console.error("Failed to load analytics:", error);

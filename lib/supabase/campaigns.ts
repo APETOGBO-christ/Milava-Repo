@@ -69,9 +69,11 @@ export class CampaignService {
       budget_total: number;
       reward_model: RewardModel;
       reward_value: number;
+      platform_fee_rate?: number;
     },
   ): Promise<Campaign> {
-    const commission = data.budget_total * 0.2; // 20% commission
+    const feeRate = Math.max(0, Number(data.platform_fee_rate || 0));
+    const commission = data.budget_total * feeRate;
     const budgetUsable = data.budget_total - commission;
 
     const { data: campaign, error } = await this.supabase

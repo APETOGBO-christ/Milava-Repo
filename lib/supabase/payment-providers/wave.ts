@@ -58,7 +58,17 @@ export class WaveProvider extends PaymentProvider {
       const total = this.calculateTotal(request.amount);
 
       if (this.isTestMode()) {
-        return this.simulatePayment(request, fee);
+        return {
+          success: false,
+          transactionId: "",
+          status: "failed",
+          amount: request.amount,
+          fee,
+          total,
+          timestamp: new Date().toISOString(),
+          message:
+            "Wave provider is in test mode and does not run simulated payouts.",
+        };
       }
 
       // Call Wave API
@@ -176,21 +186,5 @@ export class WaveProvider extends PaymentProvider {
     }
 
     return response.json();
-  }
-
-  private simulatePayment(
-    request: PaymentRequest,
-    fee: number,
-  ): PaymentResponse {
-    return {
-      success: Math.random() > 0.1, // 90% success rate
-      transactionId: `wave-sim-${Date.now()}`,
-      status: "processing",
-      amount: request.amount,
-      fee,
-      total: request.amount + fee,
-      timestamp: new Date().toISOString(),
-      message: "Simulated transaction (test mode)",
-    };
   }
 }

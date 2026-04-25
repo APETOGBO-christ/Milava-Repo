@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { useCampaigns } from "@/hooks/use-campaigns";
 import { usePosts } from "@/hooks/use-posts";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { Campaign, CandidatureWithCreator } from "@/lib/supabase/campaigns";
 import {
   Card,
@@ -36,16 +37,25 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+const EMPTY_METRICS = {
+  totalImpressions: 0,
+  totalClicks: 0,
+  totalLeads: 0,
+  totalConversions: 0,
+  totalGain: 0,
+  postCount: 0,
+  approvedCount: 0,
+};
+
 export default function CampaignDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const { authUser } = useAuth();
+  const { authUser, loading: authLoading } = useAuth();
   const {
     getCampaign,
     getCampaignCandidatures,
     acceptCandidature,
     rejectCandidature,
-    updateCampaignStatus,
     loading,
   } = useCampaigns();
   const { getCampaignMetrics } = usePosts();
@@ -59,34 +69,84 @@ export default function CampaignDetailsPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [activationError, setActivationError] = useState("");
   const [metrics, setMetrics] = useState<any>(null);
 
   const campaignId = params.id as string;
 
   // Load campaign details and candidatures
   const loadData = useCallback(async () => {
-    setLoadingData(true);
-    const campaignData = await getCampaign(campaignId);
-    setCampaign(campaignData);
-
-    const candidaturesData = await getCampaignCandidatures(campaignId);
-    setCandidatures(candidaturesData);
-
-    // Load metrics
-    try {
-      const metricsData = await getCampaignMetrics(campaignId);
-      setMetrics(metricsData);
-    } catch (error) {
-      console.error("Error loading metrics:", error);
+    if (!campaignId || !authUser?.id) {
+      return;
     }
 
+    setLoadingData(true);
+    const fetchCampaignFromApi = async (): Promise<Campaign | null> => {
+      const supabase = createBrowserSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        return null;
+      }
+
+      const response = await fetch(`/api/company/campaigns/${campaignId}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = await response.json();
+      return (payload?.campaign as Campaign) || null;
+    };
+
+    const [
+      apiCampaignData,
+      fallbackCampaignData,
+      candidaturesData,
+      metricsData,
+    ] = await Promise.all([
+      fetchCampaignFromApi(),
+      getCampaign(campaignId),
+      getCampaignCandidatures(campaignId),
+      getCampaignMetrics(campaignId).catch(() => {
+        return EMPTY_METRICS;
+      }),
+    ]);
+
+    const campaignData = apiCampaignData || fallbackCampaignData;
+
+    setCampaign(campaignData);
+    setCandidatures(candidaturesData);
+    setMetrics(metricsData);
+
     setLoadingData(false);
-  }, [campaignId, getCampaign, getCampaignCandidatures, getCampaignMetrics]);
+  }, [
+    authUser?.id,
+    campaignId,
+    getCampaign,
+    getCampaignCandidatures,
+    getCampaignMetrics,
+  ]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (authLoading) {
+      return;
+    }
+
+    if (!authUser?.id) {
+      router.push("/auth/signin");
+      return;
+    }
+
     loadData();
-  }, [loadData]);
+  }, [authLoading, authUser?.id, loadData, router]);
 
   const handleAccept = async (candidatureId: string) => {
     setActionLoading(true);
@@ -115,13 +175,49 @@ export default function CampaignDetailsPage() {
   };
 
   const handleActivate = async () => {
-    if (campaign) {
-      const result = await updateCampaignStatus(campaign.id, "active");
-      if (result) {
-        setSuccessMessage("Campagne activée!");
-        setCampaign(result);
-        setTimeout(() => setSuccessMessage(""), 3000);
+    if (!campaign?.id) return;
+
+    setActionLoading(true);
+    setActivationError("");
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setActivationError("Session expirée. Veuillez vous reconnecter.");
+        return;
       }
+
+      const response = await fetch(
+        `/api/company/campaigns/${campaign.id}/activate`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      );
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setActivationError(payload?.error || "Activation impossible.");
+        return;
+      }
+
+      setCampaign((payload?.campaign as Campaign) || campaign);
+      setSuccessMessage("Campagne activée!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+      await loadData();
+    } catch (error) {
+      setActivationError(
+        error instanceof Error ? error.message : "Activation impossible.",
+      );
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -214,6 +310,13 @@ export default function CampaignDetailsPage() {
           <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
             <Check className="w-5 h-5 text-green-600" />
             <p className="text-sm text-green-600">{successMessage}</p>
+          </div>
+        )}
+
+        {activationError && (
+          <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <AlertCircle className="w-5 h-5 text-red-600" />
+            <p className="text-sm text-red-700">{activationError}</p>
           </div>
         )}
 
@@ -483,11 +586,13 @@ export default function CampaignDetailsPage() {
           <div className="flex gap-3">
             <Button
               onClick={handleActivate}
-              disabled={loading}
+              disabled={loading || actionLoading}
               className="gap-2"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              Activer la Campagne
+              {actionLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : null}
+              {actionLoading ? "Activation..." : "Activer la Campagne"}
             </Button>
             <p className="text-sm text-[#4A4A5A] flex items-center">
               Une fois activée, les créateurs pourront candidater

@@ -2,209 +2,291 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { useCampaigns } from "@/hooks/use-campaigns";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { Campaign } from "@/lib/supabase/campaigns";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, Eye, TrendingUp, AlertCircle } from "lucide-react";
+  Loader2,
+  Plus,
+  Eye,
+  TrendingUp,
+  Clock,
+  DollarSign,
+  Users,
+  ArrowRight,
+} from "lucide-react";
 import Link from "next/link";
+
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; dot: string; badge: string }
+> = {
+  draft: {
+    label: "Brouillon",
+    dot: "bg-[#9898AA]",
+    badge: "bg-[#F4F4F6] text-[#4A4A5A] border-[#E4E4EA]",
+  },
+  active: {
+    label: "En cours",
+    dot: "bg-emerald-400",
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  },
+  pending_funding: {
+    label: "En attente de fonds",
+    dot: "bg-amber-400",
+    badge: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  paused: {
+    label: "En pause",
+    dot: "bg-amber-400",
+    badge: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  completed: {
+    label: "Terminée",
+    dot: "bg-[#C7D9FF]",
+    badge: "bg-[#EEF4FF] text-[#0047FF] border-[#C7D9FF]",
+  },
+  cancelled: {
+    label: "Annulée",
+    dot: "bg-red-300",
+    badge: "bg-red-50 text-red-600 border-red-200",
+  },
+};
 
 export default function CampaignsPage() {
   const { authUser } = useAuth();
-  const { getCompanyCampaigns, loading } = useCampaigns();
-
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loadingCampaigns, setLoadingCampaigns] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("all");
 
-  const loadCampaigns = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!authUser) return;
-    setLoadingCampaigns(true);
-    const userCampaigns = await getCompanyCampaigns(authUser.id);
-    setCampaigns(userCampaigns);
-    setLoadingCampaigns(false);
-  }, [authUser, getCompanyCampaigns]);
+    setLoading(true);
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        setCampaigns([]);
+        return;
+      }
+
+      const response = await fetch("/api/company/campaigns", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        setCampaigns([]);
+        return;
+      }
+
+      setCampaigns((payload?.campaigns as Campaign[]) || []);
+    } catch {
+      setCampaigns([]);
+    }
+    setLoading(false);
+  }, [authUser]);
 
   useEffect(() => {
-    if (authUser) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadCampaigns();
-    }
-  }, [authUser, loadCampaigns]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (authUser) load();
+  }, [authUser, load]);
 
-  const getStatusBadge = (status: string) => {
-    const styles: Record<string, { bg: string; text: string; label: string }> =
-      {
-        draft: {
-          bg: "bg-yellow-100",
-          text: "text-yellow-700",
-          label: "Brouillon",
-        },
-        active: { bg: "bg-green-100", text: "text-green-700", label: "Active" },
-        completed: {
-          bg: "bg-gray-100",
-          text: "text-gray-700",
-          label: "Terminée",
-        },
-      };
-    const style = styles[status] || styles.draft;
-    return <Badge className={`${style.bg} ${style.text}`}>{style.label}</Badge>;
-  };
+  const tabs = [
+    { key: "all", label: "Toutes", count: campaigns.length },
+    {
+      key: "active",
+      label: "En cours",
+      count: campaigns.filter((c) => c.status === "active").length,
+    },
+    {
+      key: "draft",
+      label: "Brouillons",
+      count: campaigns.filter((c) => c.status === "draft").length,
+    },
+    {
+      key: "completed",
+      label: "Terminées",
+      count: campaigns.filter((c) => c.status === "completed").length,
+    },
+  ];
 
-  if (loadingCampaigns) {
+  const filtered =
+    filter === "all" ? campaigns : campaigns.filter((c) => c.status === filter);
+
+  if (loading) {
     return (
-      <main className="flex-1 bg-[#F4F4F6] min-h-screen p-4 sm:p-6 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto text-[#0047FF]" />
-          <p className="text-[#4A4A5A]">Chargement des campagnes...</p>
-        </div>
-      </main>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#0047FF]" />
+      </div>
     );
   }
 
   return (
-    <main className="flex-1 bg-[#F4F4F6] min-h-screen p-4 sm:p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold font-display text-[#0F0F14]">
-              Mes Campagnes
-            </h1>
-            <p className="text-[#4A4A5A]">
-              Gérez vos campagnes d&apos;influence
-            </p>
-          </div>
-          <Link href="/company/campaigns/new">
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Nouvelle Campagne
-            </Button>
-          </Link>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9898AA] mb-1">
+            Espace marque
+          </p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-[-0.03em] text-[#0F0F14]">
+            Mes campagnes
+          </h1>
         </div>
+        <Link
+          href="/company/campaigns/new"
+          className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-[#0047FF] text-white text-sm font-semibold hover:bg-[#0038CC] transition-all shadow-[0_2px_12px_rgba(0,71,255,0.2)]"
+        >
+          <Plus className="w-4 h-4" />
+          Nouvelle campagne
+        </Link>
+      </div>
 
-        {/* Campaigns List or Empty State */}
-        {campaigns.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="text-center space-y-4">
-              <TrendingUp className="w-12 h-12 mx-auto text-[#9898AA]" />
-              <h3 className="text-lg font-medium text-[#0F0F14]">
-                Aucune campagne
-              </h3>
-              <p className="text-[#4A4A5A]">
-                Créez votre première campagne pour trouver des créateurs
-              </p>
-              <Link href="/company/campaigns/new">
-                <Button className="gap-2 mt-4">
-                  <Plus className="w-4 h-4" />
-                  Créer une Campagne
-                </Button>
-              </Link>
-            </div>
+      {/* Tabs */}
+      <div className="flex gap-1.5 flex-wrap">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setFilter(t.key)}
+            className={`h-9 px-4 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 ${
+              filter === t.key
+                ? "bg-[#0047FF] text-white shadow-[0_2px_8px_rgba(0,71,255,0.2)]"
+                : "bg-white border border-[#E4E4EA] text-[#4A4A5A] hover:border-[#0047FF] hover:text-[#0047FF]"
+            }`}
+          >
+            {t.label}
+            <span
+              className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${filter === t.key ? "bg-white/20 text-white" : "bg-[#F4F4F6] text-[#9898AA]"}`}
+            >
+              {t.count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* List */}
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-dashed border-[#D6DCE8] px-6 py-16 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-[#EEF4FF] flex items-center justify-center mx-auto mb-4">
+            <TrendingUp className="w-5 h-5 text-[#0047FF]" />
           </div>
-        ) : (
-          <div className="space-y-4">
-            {campaigns.map((campaign) => (
-              <Card
-                key={campaign.id}
-                className="hover:border-[#0047FF] transition-colors"
-              >
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between gap-6">
-                    {/* Campaign Info */}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-bold text-[#0F0F14]">
-                          {campaign.title}
-                        </h3>
-                        {getStatusBadge(campaign.status)}
-                      </div>
-                      <p className="text-sm text-[#4A4A5A] mb-4">
-                        {campaign.description}
+          <h2 className="text-lg font-bold text-[#0F0F14] mb-2">
+            {filter === "all"
+              ? "Aucune campagne"
+              : `Aucune campagne "${tabs.find((t) => t.key === filter)?.label.toLowerCase()}"`}
+          </h2>
+          <p className="text-sm text-[#4A4A5A] mb-6 max-w-xs mx-auto">
+            {filter === "all"
+              ? "Créez votre première campagne pour commencer à travailler avec des créateurs."
+              : "Aucune campagne dans cette catégorie."}
+          </p>
+          {filter === "all" && (
+            <Link
+              href="/company/campaigns/new"
+              className="inline-flex items-center gap-2 h-10 px-5 rounded-xl bg-[#0047FF] text-white text-sm font-semibold hover:bg-[#0038CC] transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Créer une campagne
+            </Link>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_2px_12px_rgba(15,15,20,0.04)] overflow-hidden">
+          <div className="divide-y divide-[#E4E4EA]">
+            {filtered.map((c) => {
+              const st = STATUS_CONFIG[c.status] || STATUS_CONFIG.draft;
+              const endDate =
+                (c as Campaign & { ends_at?: string; end_date?: string })
+                  .ends_at ||
+                (c as Campaign & { ends_at?: string; end_date?: string })
+                  .end_date ||
+                c.ended_at;
+              const spent =
+                (
+                  c as Campaign & {
+                    spent_budget?: number;
+                    spent_amount?: number;
+                  }
+                ).spent_amount ||
+                (
+                  c as Campaign & {
+                    spent_budget?: number;
+                    spent_amount?: number;
+                  }
+                ).spent_budget ||
+                0;
+              const pct =
+                c.budget_total > 0
+                  ? Math.round((spent / c.budget_total) * 100)
+                  : 0;
+              return (
+                <Link
+                  key={c.id}
+                  href={`/company/campaigns/${c.id}`}
+                  className="flex flex-col sm:flex-row sm:items-center gap-4 px-6 py-4 hover:bg-[#FAFBFE] transition-colors group"
+                >
+                  {/* Status + title */}
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${st.dot}`}
+                    />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-[#0F0F14] truncate group-hover:text-[#0047FF] transition-colors">
+                        {c.title}
                       </p>
-
-                      {/* Stats */}
-                      <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Modèle
-                          </p>
-                          <p className="font-medium text-[#0F0F14]">
-                            {campaign.reward_model}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Tarif
-                          </p>
-                          <p className="font-medium text-[#0047FF]">
-                            {campaign.reward_value}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Budget Total
-                          </p>
-                          <p className="font-medium text-[#0F0F14]">
-                            {(campaign.budget_total / 1000).toFixed(1)}k FCFA
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Disponible
-                          </p>
-                          <p className="font-medium text-green-600">
-                            {(campaign.budget_usable / 1000).toFixed(1)}k FCFA
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Créée
-                          </p>
-                          <p className="font-medium text-[#0F0F14]">
-                            {new Date(campaign.created_at).toLocaleDateString(
-                              "fr-FR",
-                            )}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-[#9898AA] uppercase tracking-wide">
-                            Statut
-                          </p>
-                          <p className="font-medium text-[#0F0F14]">
-                            {campaign.status === "draft"
-                              ? "Brouillon"
-                              : campaign.status === "active"
-                                ? "Active"
-                                : "Terminée"}
-                          </p>
-                        </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-[#9898AA]">
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {endDate
+                            ? new Date(endDate).toLocaleDateString("fr-FR", {
+                                day: "numeric",
+                                month: "short",
+                              })
+                            : "—"}
+                        </span>
+                        <span className="capitalize">{c.reward_model}</span>
                       </div>
                     </div>
-
-                    {/* Action Button */}
-                    <Link href={`/company/campaigns/${campaign.id}`}>
-                      <Button
-                        variant="secondary"
-                        className="flex items-center gap-2"
-                      >
-                        <Eye className="w-4 h-4" />
-                        Voir
-                      </Button>
-                    </Link>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
+
+                  {/* Budget bar */}
+                  <div className="w-full sm:w-36">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-[#9898AA]">Budget</span>
+                      <span className="font-semibold text-[#0F0F14]">
+                        ${spent.toFixed(0)}/${c.budget_total}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-[#E4E4EA] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#0047FF] rounded-full"
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Status badge + arrow */}
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span
+                      className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${st.badge}`}
+                    >
+                      {st.label}
+                    </span>
+                    <ArrowRight className="w-4 h-4 text-[#9898AA] group-hover:text-[#0047FF] group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </Link>
+              );
+            })}
           </div>
-        )}
-      </div>
-    </main>
+        </div>
+      )}
+    </div>
   );
 }

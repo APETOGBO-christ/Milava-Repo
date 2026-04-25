@@ -204,10 +204,6 @@ export class PaymentService {
       return { success: false, error: validation.error };
     }
 
-    // In production, this would call the actual payment provider API
-    // For now, return a mock response
-
-    // Simulate different provider behaviors
     switch (withdrawal.provider) {
       case "wave":
         return this.initiateWavePayment(withdrawal);
@@ -227,56 +223,45 @@ export class PaymentService {
   private async initiateWavePayment(
     withdrawal: WithdrawalRequest,
   ): Promise<{ success: boolean; reference?: string; error?: string }> {
-    // Mock: In production, call Wave API
-    // POST https://api.wave.com/graphql with GraphQL mutation
-    const reference = `WAVE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     return {
-      success: true,
-      reference,
+      success: false,
+      error: `Provider integration not configured: ${withdrawal.provider}`,
     };
   }
 
   private async initiateOrangeMoneyPayment(
     withdrawal: WithdrawalRequest,
   ): Promise<{ success: boolean; reference?: string; error?: string }> {
-    // Mock: In production, call Orange Money API
-    const reference = `ORANGE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     return {
-      success: true,
-      reference,
+      success: false,
+      error: `Provider integration not configured: ${withdrawal.provider}`,
     };
   }
 
   private async initiateMTNPayment(
     withdrawal: WithdrawalRequest,
   ): Promise<{ success: boolean; reference?: string; error?: string }> {
-    // Mock: In production, call MTN API
-    const reference = `MTN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     return {
-      success: true,
-      reference,
+      success: false,
+      error: `Provider integration not configured: ${withdrawal.provider}`,
     };
   }
 
   private async initiateBankTransfer(
     withdrawal: WithdrawalRequest,
   ): Promise<{ success: boolean; reference?: string; error?: string }> {
-    // Mock: In production, integrate with banking system
-    const reference = `BANK_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     return {
-      success: true,
-      reference,
+      success: false,
+      error: `Provider integration not configured: ${withdrawal.provider}`,
     };
   }
 
   private async initiateCardPayment(
     withdrawal: WithdrawalRequest,
   ): Promise<{ success: boolean; reference?: string; error?: string }> {
-    // Mock: In production, call Stripe API
-    const reference = `STRIPE_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     return {
-      success: true,
-      reference,
+      success: false,
+      error: `Provider integration not configured: ${withdrawal.provider}`,
     };
   }
 

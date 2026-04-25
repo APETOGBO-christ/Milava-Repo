@@ -5,23 +5,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { useWallet } from "@/hooks/use-wallet";
 import { usePayment } from "@/hooks/use-payment";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   DollarSign,
   TrendingUp,
   Loader2,
@@ -32,8 +15,19 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   RefreshCw,
+  Wallet,
+  ChevronRight,
 } from "lucide-react";
-import Link from "next/link";
+
+const WALLET_CACHE_TTL_MS = 30 * 1000;
+type WalletCacheEntry = {
+  balance: any;
+  transactions: any[];
+  withdrawals: any[];
+  stats: any;
+  ts: number;
+};
+const walletCache = new Map<string, WalletCacheEntry>();
 
 export default function WalletPage() {
   const { authUser } = useAuth();
@@ -45,19 +39,16 @@ export default function WalletPage() {
     getWithdrawalRequests,
     getWalletStats,
   } = useWallet();
-  const { getAllProviders, validateDestination, calculateFee } = usePayment();
+  const { getAllProviders, validateDestination } = usePayment();
 
-  const [wallet, setWallet] = useState<any>(null);
   const [balance, setBalance] = useState<any>(null);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Withdrawal form state
-  const [showWithdrawalForm, setShowWithdrawalForm] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<string>("");
+  const [showForm, setShowForm] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState("");
   const [destination, setDestination] = useState("");
   const [amount, setAmount] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
@@ -66,43 +57,67 @@ export default function WalletPage() {
 
   const providers = getAllProviders();
 
-  // Load wallet data
+  const refreshFromServer = useCallback(
+    async (showMainLoader: boolean) => {
+      if (!authUser) return;
+      if (showMainLoader) {
+        setLoading(true);
+      }
+
+      try {
+        const [balanceData, txData, wdData, statsData] = await Promise.all([
+          getBalance(authUser.id),
+          getTransactionHistory(authUser.id, 20),
+          getWithdrawalRequests(authUser.id),
+          getWalletStats(authUser.id),
+        ]);
+
+        setBalance(balanceData);
+        setTransactions(txData);
+        setWithdrawals(wdData);
+        setStats(statsData);
+
+        walletCache.set(authUser.id, {
+          balance: balanceData,
+          transactions: txData,
+          withdrawals: wdData,
+          stats: statsData,
+          ts: Date.now(),
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (showMainLoader) {
+          setLoading(false);
+        }
+      }
+    },
+    [
+      authUser,
+      getBalance,
+      getTransactionHistory,
+      getWithdrawalRequests,
+      getWalletStats,
+    ],
+  );
+
   const loadData = useCallback(async () => {
     if (!authUser) return;
+    const cached = walletCache.get(authUser.id);
+    const isFresh = cached && Date.now() - cached.ts < WALLET_CACHE_TTL_MS;
 
-    try {
-      const [
-        walletData,
-        balanceData,
-        transactionsData,
-        withdrawalsData,
-        statsData,
-      ] = await Promise.all([
-        getWallet(authUser.id),
-        getBalance(authUser.id),
-        getTransactionHistory(authUser.id, 20),
-        getWithdrawalRequests(authUser.id),
-        getWalletStats(authUser.id),
-      ]);
-
-      setWallet(walletData);
-      setBalance(balanceData);
-      setTransactions(transactionsData);
-      setWithdrawals(withdrawalsData);
-      setStats(statsData);
-    } catch (error) {
-      console.error("Error loading wallet:", error);
-    } finally {
+    if (isFresh) {
+      setBalance(cached.balance);
+      setTransactions(cached.transactions);
+      setWithdrawals(cached.withdrawals);
+      setStats(cached.stats);
       setLoading(false);
+      void refreshFromServer(false);
+      return;
     }
-  }, [
-    authUser,
-    getWallet,
-    getBalance,
-    getTransactionHistory,
-    getWithdrawalRequests,
-    getWalletStats,
-  ]);
+
+    await refreshFromServer(true);
+  }, [authUser, refreshFromServer]);
 
   useEffect(() => {
     loadData();
@@ -111,510 +126,403 @@ export default function WalletPage() {
   const handleRefresh = async () => {
     if (!authUser) return;
     setRefreshing(true);
-    try {
-      const [balanceData, transactionsData, withdrawalsData] =
-        await Promise.all([
-          getBalance(authUser.id),
-          getTransactionHistory(authUser.id, 20),
-          getWithdrawalRequests(authUser.id),
-        ]);
-      setBalance(balanceData);
-      setTransactions(transactionsData);
-      setWithdrawals(withdrawalsData);
-    } catch (error) {
-      console.error("Error refreshing:", error);
-    } finally {
-      setRefreshing(false);
-    }
+    await refreshFromServer(false);
+    setRefreshing(false);
   };
 
-  const handleSubmitWithdrawal = async (e: React.FormEvent) => {
+  const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
-
     if (!selectedProvider || !destination || !amount || !authUser) {
       setFormError("Tous les champs sont requis");
       return;
     }
-
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
+    const num = parseFloat(amount);
+    if (isNaN(num) || num <= 0) {
       setFormError("Montant invalide");
       return;
     }
-
-    // Validate destination
-    const destValidation = validateDestination(
-      selectedProvider as any,
-      destination,
-    );
-    if (!destValidation.valid) {
-      setFormError(destValidation.error || "Destination invalide");
+    const v = validateDestination(selectedProvider as any, destination);
+    if (!v.valid) {
+      setFormError(v.error || "Destination invalide");
       return;
     }
-
-    // Check balance
-    if (balance && numAmount > balance.available) {
+    if (balance && num > balance.available) {
       setFormError("Solde insuffisant");
       return;
     }
-
     setFormLoading(true);
     try {
       await requestWithdrawal(
         authUser.id,
         selectedProvider as any,
-        numAmount,
+        num,
         destination,
       );
-
       setFormSuccess(true);
       setAmount("");
       setDestination("");
       setSelectedProvider("");
-
-      // Reload withdrawals
-      const updatedWithdrawals = await getWithdrawalRequests(authUser.id);
-      setWithdrawals(updatedWithdrawals);
-
-      // Close modal after 2 seconds
+      const updated = await getWithdrawalRequests(authUser.id);
+      setWithdrawals(updated);
       setTimeout(() => {
-        setShowWithdrawalForm(false);
+        setShowForm(false);
         setFormSuccess(false);
       }, 2000);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Erreur lors de la demande";
-      setFormError(message);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : "Erreur lors de la demande",
+      );
     } finally {
       setFormLoading(false);
     }
   };
 
-  const getTransactionIcon = (kind: string) => {
-    switch (kind) {
-      case "earning_pending":
-      case "earning_released":
-        return <ArrowDownRight className="w-4 h-4 text-green-500" />;
-      case "withdrawal_requested":
-      case "withdrawal_completed":
-      case "withdrawal_failed":
-        return <ArrowUpRight className="w-4 h-4 text-red-500" />;
-      default:
-        return <ArrowDownRight className="w-4 h-4 text-gray-500" />;
-    }
-  };
-
-  const getTransactionColor = (kind: string) => {
-    if (kind.includes("earning")) return "text-green-600";
-    if (kind.includes("withdrawal")) return "text-red-600";
-    return "text-gray-600";
-  };
-
-  const getWithdrawalStatusBadge = (status: string) => {
-    const styles: Record<
-      string,
-      { bg: string; text: string; icon: any; label: string }
-    > = {
-      pending: {
-        bg: "bg-yellow-100",
-        text: "text-yellow-700",
-        icon: <Clock className="w-3 h-3" />,
-        label: "En attente",
-      },
-      processing: {
-        bg: "bg-blue-100",
-        text: "text-blue-700",
-        icon: <RefreshCw className="w-3 h-3" />,
-        label: "En cours",
-      },
-      completed: {
-        bg: "bg-green-100",
-        text: "text-green-700",
-        icon: <CheckCircle2 className="w-3 h-3" />,
-        label: "Complété",
-      },
-      failed: {
-        bg: "bg-red-100",
-        text: "text-red-700",
-        icon: <X className="w-3 h-3" />,
-        label: "Échoué",
-      },
-      cancelled: {
-        bg: "bg-gray-100",
-        text: "text-gray-700",
-        icon: <X className="w-3 h-3" />,
-        label: "Annulé",
-      },
-    };
-
-    const style = styles[status] || styles.pending;
-    return (
-      <Badge className={`${style.bg} ${style.text} gap-1`}>
-        {style.icon}
-        {style.label}
-      </Badge>
-    );
+  const statusConfig: Record<string, { label: string; color: string }> = {
+    pending: {
+      label: "En attente",
+      color: "bg-amber-50 text-amber-700 border-amber-200",
+    },
+    processing: {
+      label: "En cours",
+      color: "bg-[#EEF4FF] text-[#0047FF] border-[#C7D9FF]",
+    },
+    completed: {
+      label: "Complété",
+      color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    },
+    failed: { label: "Échoué", color: "bg-red-50 text-red-700 border-red-200" },
+    cancelled: {
+      label: "Annulé",
+      color: "bg-[#F4F4F6] text-[#4A4A5A] border-[#E4E4EA]",
+    },
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-6 h-6 animate-spin text-[#0047FF]" />
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-start mb-8">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Mon Portefeuille</h1>
-          <p className="text-gray-600">Gérez vos gains et retraits</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9898AA] mb-1">
+            Finances
+          </p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-[-0.03em] text-[#0F0F14]">
+            Mon portefeuille
+          </h1>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
+        <button
           onClick={handleRefresh}
           disabled={refreshing}
+          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-xl border border-[#E4E4EA] bg-white text-xs font-semibold text-[#4A4A5A] hover:border-[#0047FF] hover:text-[#0047FF] transition-all"
         >
-          {refreshing && <RefreshCw className="w-4 h-4 mr-2 animate-spin" />}
+          <RefreshCw
+            className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`}
+          />
           Actualiser
-        </Button>
+        </button>
       </div>
 
-      {/* Balance Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        {/* Available Balance */}
-        <Card className="border-green-200 bg-green-50">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-green-900">
-              Solde disponible
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-900">
-              {balance?.available.toLocaleString("fr-FR", {
-                minimumFractionDigits: 0,
-              })}{" "}
-              FCFA
-            </div>
-            <p className="text-xs text-green-700 mt-1">Prêt à retirer</p>
-          </CardContent>
-        </Card>
-
-        {/* Pending Balance */}
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-yellow-900">
-              Solde en attente
-            </CardTitle>
-            <Clock className="h-4 w-4 text-yellow-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-900">
-              {balance?.pending.toLocaleString("fr-FR", {
-                minimumFractionDigits: 0,
-              })}{" "}
-              FCFA
-            </div>
-            <p className="text-xs text-yellow-700 mt-1">
-              À partir des gains en cours
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Total Earned */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total gagnés</CardTitle>
-            <TrendingUp className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats?.totalEarned.toLocaleString("fr-FR", {
-                minimumFractionDigits: 0,
-              })}{" "}
-              FCFA
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Tous les temps</p>
-          </CardContent>
-        </Card>
-
-        {/* Total Withdrawn */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total retiré</CardTitle>
-            <ArrowUpRight className="h-4 w-4 text-orange-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {stats?.totalWithdrawn.toLocaleString("fr-FR", {
-                minimumFractionDigits: 0,
-              })}{" "}
-              FCFA
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Paiements complétés</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Withdrawal Button */}
-      <div className="mb-8">
-        <Button
-          onClick={() => setShowWithdrawalForm(true)}
-          className="bg-green-500 hover:bg-green-600"
-        >
-          <ArrowUpRight className="w-4 h-4 mr-2" />
-          Demander un retrait
-        </Button>
-      </div>
-
-      {/* Pending Withdrawals */}
-      {withdrawals.length > 0 && (
-        <Card className="mb-8">
-          <CardHeader>
-            <CardTitle>Demandes de retrait en cours</CardTitle>
-            <CardDescription>Statut de vos retraits récents</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {withdrawals.map((withdrawal) => (
-                <div
-                  key={withdrawal.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-                >
-                  <div className="flex-1">
-                    <p className="font-semibold text-gray-900">
-                      {withdrawal.amount.toLocaleString("fr-FR", {
-                        minimumFractionDigits: 0,
-                      })}{" "}
-                      FCFA
-                    </p>
-                    <div className="flex gap-4 mt-2 text-sm text-gray-600">
-                      <span>Via {withdrawal.provider}</span>
-                      <span>
-                        {new Date(withdrawal.requested_at).toLocaleDateString(
-                          "fr-FR",
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {getWithdrawalStatusBadge(withdrawal.status)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Transaction History */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Historique des transactions</CardTitle>
-          <CardDescription>Tous vos gains et retraits</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {transactions.length === 0 ? (
-            <div className="text-center py-12">
-              <DollarSign className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-600">Aucune transaction pour le moment</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {transactions.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between p-4 border-b last:border-b-0"
-                >
-                  <div className="flex items-center gap-4 flex-1">
-                    {getTransactionIcon(transaction.kind)}
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {transaction.description}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(transaction.created_at).toLocaleDateString(
-                          "fr-FR",
-                        )}{" "}
-                        {new Date(transaction.created_at).toLocaleTimeString(
-                          "fr-FR",
-                          {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          },
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div
-                    className={`text-right font-semibold ${getTransactionColor(transaction.kind)}`}
-                  >
-                    {transaction.amount > 0 ? "+" : ""}
-                    {transaction.amount.toLocaleString("fr-FR", {
-                      minimumFractionDigits: 0,
-                    })}{" "}
-                    FCFA
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Withdrawal Form Modal */}
-      <Dialog open={showWithdrawalForm} onOpenChange={setShowWithdrawalForm}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Demander un retrait</DialogTitle>
-            <DialogDescription>
-              Retirez vos gains disponibles vers votre compte
-            </DialogDescription>
-          </DialogHeader>
-
-          {formSuccess && (
-            <div className="flex gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-green-900">
-                  Demande soumise !
-                </p>
-                <p className="text-sm text-green-700 mt-1">
-                  Votre demande de retrait a été enregistrée. Nous
-                  l&apos;accorderons rapidement.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {formError && !formSuccess && (
-            <div className="flex gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="font-semibold text-red-900">Erreur</p>
-                <p className="text-sm text-red-700 mt-1">{formError}</p>
-              </div>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmitWithdrawal} className="space-y-6">
-            {/* Provider Selector */}
+      {/* Balance hero card */}
+      <div className="bg-[#0047FF] rounded-2xl p-6 sm:p-8 text-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-white/5 -translate-y-1/2 translate-x-1/4" />
+        <div className="relative z-10">
+          <div className="flex items-start justify-between gap-4 mb-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Méthode de paiement <span className="text-red-500">*</span>
-              </label>
-              <div className="space-y-2">
-                {providers.map((provider) => (
-                  <label
-                    key={provider.code}
-                    className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50"
-                  >
-                    <input
-                      type="radio"
-                      name="provider"
-                      value={provider.code}
-                      checked={selectedProvider === provider.code}
-                      onChange={(e) => setSelectedProvider(e.target.value)}
-                      disabled={formLoading || formSuccess}
-                    />
-                    <div>
-                      <p className="font-medium text-gray-900">
-                        {provider.displayName}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {provider.description}
-                      </p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* Destination Input */}
-            {selectedProvider && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Destination <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  type="text"
-                  placeholder={
-                    providers.find((p) => p.code === selectedProvider)
-                      ?.phoneFormat || "Numéro de compte ou téléphone"
-                  }
-                  value={destination}
-                  onChange={(e) => setDestination(e.target.value)}
-                  disabled={formLoading || formSuccess}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {providers.find((p) => p.code === selectedProvider)
-                    ?.requiresPhone
-                    ? "Entrez votre numéro de téléphone au format international"
-                    : "Numéro de compte bancaire"}
-                </p>
-              </div>
-            )}
-
-            {/* Amount Input */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Montant <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="number"
-                placeholder="Montant"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={formLoading || formSuccess}
-                min="1"
-                max={balance?.available || 0}
-              />
-              {amount && selectedProvider && (
-                <p className="text-xs text-gray-600 mt-2">
-                  Vous recevrez:{" "}
-                  {amount &&
-                    providers.find((p) => p.code === selectedProvider)
-                      ?.minAmount &&
-                    (
-                      parseFloat(amount) -
-                      (parseFloat(amount) *
-                        (providers.find((p) => p.code === selectedProvider)
-                          ?.feePercentage || 0)) /
-                        100
-                    ).toLocaleString("fr-FR", {
-                      minimumFractionDigits: 0,
-                    })}{" "}
-                  FCFA
-                </p>
-              )}
-              <p className="text-xs text-gray-500 mt-1">
-                Solde disponible: {balance?.available.toLocaleString("fr-FR")}{" "}
-                FCFA
+              <p className="text-white/60 text-xs font-semibold uppercase tracking-[0.18em] mb-1">
+                Solde disponible
+              </p>
+              <p className="text-4xl font-bold tracking-tight">
+                ${balance?.available?.toFixed(2) ?? "0.00"}
               </p>
             </div>
+            <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
+              <Wallet className="w-6 h-6 text-white" />
+            </div>
+          </div>
 
-            {/* Submit Button */}
-            <Button
-              type="submit"
-              className="w-full bg-blue-500 hover:bg-blue-600"
-              disabled={
-                formLoading ||
-                formSuccess ||
-                !selectedProvider ||
-                !destination ||
-                !amount
-              }
-            >
-              {formLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              {formSuccess ? "Demande envoyée" : "Confirmer le retrait"}
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+          <div className="flex flex-wrap gap-4 mb-6">
+            <div className="bg-white/10 rounded-xl px-4 py-2.5">
+              <p className="text-white/60 text-xs mb-0.5">En attente</p>
+              <p className="font-bold">
+                ${balance?.pending?.toFixed(2) ?? "0.00"}
+              </p>
+            </div>
+            <div className="bg-white/10 rounded-xl px-4 py-2.5">
+              <p className="text-white/60 text-xs mb-0.5">Total gagné</p>
+              <p className="font-bold">
+                ${stats?.totalEarned?.toFixed(2) ?? "0.00"}
+              </p>
+            </div>
+            <div className="bg-white/10 rounded-xl px-4 py-2.5">
+              <p className="text-white/60 text-xs mb-0.5">Total retiré</p>
+              <p className="font-bold">
+                ${stats?.totalWithdrawn?.toFixed(2) ?? "0.00"}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowForm(true)}
+            className="inline-flex items-center gap-2 h-11 px-6 rounded-xl bg-white text-[#0047FF] text-sm font-bold hover:bg-white/90 transition-all"
+          >
+            <ArrowUpRight className="w-4 h-4" />
+            Retirer mes gains
+          </button>
+        </div>
+      </div>
+
+      {/* Pending withdrawals */}
+      {withdrawals.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_2px_12px_rgba(15,15,20,0.04)] overflow-hidden">
+          <div className="px-6 py-4 border-b border-[#E4E4EA]">
+            <h2 className="font-bold text-[#0F0F14]">Retraits en cours</h2>
+          </div>
+          <div className="divide-y divide-[#E4E4EA]">
+            {withdrawals.map((w) => {
+              const s = statusConfig[w.status] || statusConfig.pending;
+              return (
+                <div
+                  key={w.id}
+                  className="flex items-center justify-between px-6 py-4 gap-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-[#EEF4FF] flex items-center justify-center flex-shrink-0">
+                      <ArrowUpRight className="w-4 h-4 text-[#0047FF]" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-[#0F0F14]">
+                        ${w.amount?.toFixed(2)}
+                      </p>
+                      <p className="text-xs text-[#9898AA]">
+                        Via {w.provider} ·{" "}
+                        {new Date(w.requested_at).toLocaleDateString("fr-FR")}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-full border ${s.color}`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Transactions */}
+      <div className="bg-white rounded-2xl border border-[#E4E4EA] shadow-[0_2px_12px_rgba(15,15,20,0.04)] overflow-hidden">
+        <div className="px-6 py-4 border-b border-[#E4E4EA]">
+          <h2 className="font-bold text-[#0F0F14]">Historique</h2>
+        </div>
+        {transactions.length === 0 ? (
+          <div className="px-6 py-16 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-[#EEF4FF] flex items-center justify-center mx-auto mb-4">
+              <DollarSign className="w-5 h-5 text-[#0047FF]" />
+            </div>
+            <p className="text-sm text-[#4A4A5A]">
+              Aucune transaction pour le moment
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-[#E4E4EA]">
+            {transactions.map((tx) => {
+              const isCredit = tx.kind?.includes("earning");
+              return (
+                <div key={tx.id} className="flex items-center gap-4 px-6 py-4">
+                  <div
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${isCredit ? "bg-emerald-50" : "bg-red-50"}`}
+                  >
+                    {isCredit ? (
+                      <ArrowDownRight className="w-4 h-4 text-emerald-600" />
+                    ) : (
+                      <ArrowUpRight className="w-4 h-4 text-red-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-[#0F0F14] text-sm truncate">
+                      {tx.description}
+                    </p>
+                    <p className="text-xs text-[#9898AA]">
+                      {new Date(tx.created_at).toLocaleDateString("fr-FR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
+                  </div>
+                  <p
+                    className={`font-bold text-sm flex-shrink-0 ${isCredit ? "text-emerald-600" : "text-red-500"}`}
+                  >
+                    {tx.amount > 0 ? "+" : ""}${Math.abs(tx.amount)?.toFixed(2)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Withdrawal modal overlay */}
+      {showForm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-4"
+          onClick={() => !formLoading && setShowForm(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[#E4E4EA]">
+              <h3 className="font-bold text-[#0F0F14]">Retirer mes gains</h3>
+              <button
+                onClick={() => !formLoading && setShowForm(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[#F4F4F6] text-[#9898AA] hover:text-[#0F0F14] transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {formSuccess && (
+                <div className="flex gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-emerald-900 text-sm">
+                      Demande envoyée
+                    </p>
+                    <p className="text-xs text-emerald-700 mt-0.5">
+                      Traitement sous 24h ouvrées.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {formError && !formSuccess && (
+                <div className="flex gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-600">{formError}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleWithdraw} className="space-y-5">
+                {/* Provider */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-[#0F0F14] uppercase tracking-wide">
+                    Méthode de paiement
+                  </label>
+                  <div className="space-y-2">
+                    {providers.map((p) => (
+                      <label
+                        key={p.code}
+                        className={`flex items-center gap-3 p-3.5 rounded-xl border cursor-pointer transition-all ${selectedProvider === p.code ? "border-[#0047FF] bg-[#EEF4FF]" : "border-[#E4E4EA] bg-[#F4F4F6] hover:border-[#C7D9FF]"}`}
+                      >
+                        <input
+                          type="radio"
+                          name="provider"
+                          value={p.code}
+                          checked={selectedProvider === p.code}
+                          onChange={(e) => setSelectedProvider(e.target.value)}
+                          className="hidden"
+                          disabled={formLoading || formSuccess}
+                        />
+                        <div
+                          className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${selectedProvider === p.code ? "border-[#0047FF]" : "border-[#D0D0DA]"}`}
+                        >
+                          {selectedProvider === p.code && (
+                            <div className="w-2 h-2 rounded-full bg-[#0047FF]" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-[#0F0F14] text-sm">
+                            {p.displayName}
+                          </p>
+                          <p className="text-xs text-[#9898AA]">
+                            {p.description}
+                          </p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Destination */}
+                {selectedProvider && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-[#0F0F14] uppercase tracking-wide">
+                      Destination
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={
+                        providers.find((p) => p.code === selectedProvider)
+                          ?.phoneFormat || "Numéro ou IBAN"
+                      }
+                      value={destination}
+                      onChange={(e) => setDestination(e.target.value)}
+                      disabled={formLoading || formSuccess}
+                      className="w-full h-11 px-4 rounded-xl border border-[#E4E4EA] bg-[#F4F4F6] text-sm text-[#0F0F14] placeholder-[#9898AA] outline-none focus:border-[#0047FF] focus:bg-white transition-all"
+                    />
+                  </div>
+                )}
+
+                {/* Amount */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-[#0F0F14] uppercase tracking-wide">
+                    Montant (USD)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-[#0047FF]">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      disabled={formLoading || formSuccess}
+                      min="5"
+                      max={balance?.available || 0}
+                      className="w-full h-11 pl-8 pr-4 rounded-xl border border-[#E4E4EA] bg-[#F4F4F6] text-sm text-[#0F0F14] placeholder-[#9898AA] outline-none focus:border-[#0047FF] focus:bg-white transition-all"
+                    />
+                  </div>
+                  <p className="text-xs text-[#9898AA]">
+                    Solde disponible :{" "}
+                    <span className="font-semibold text-[#0F0F14]">
+                      ${balance?.available?.toFixed(2) ?? "0.00"}
+                    </span>{" "}
+                    · Minimum : $5.00
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={
+                    formLoading ||
+                    formSuccess ||
+                    !selectedProvider ||
+                    !destination ||
+                    !amount
+                  }
+                  className="w-full h-11 flex items-center justify-center gap-2 bg-[#0047FF] text-white text-sm font-semibold rounded-xl hover:bg-[#0038CC] disabled:opacity-50 transition-all"
+                >
+                  {formLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {formSuccess ? "Demande envoyée !" : "Confirmer le retrait"}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
